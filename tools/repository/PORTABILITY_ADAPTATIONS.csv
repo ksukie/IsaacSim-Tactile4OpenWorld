@@ -1,0 +1,5 @@
+path,mechanism,configuration,status,reason
+active-isaaclab-2.1/experiments/simulation-prototypes/check_taxim_sim.py,SDK discovery,OWT_SDK_ROOT,active,Uses the archived SDK by default and permits an explicit SDK location.
+archive-isaaclab-2.3/experiments/sensors/openworldtactile_finger_sensor.py,SDK discovery,OWT_SDK_ROOT,active,Finds the SDK from the archive container and permits an explicit SDK location.
+active-isaaclab-2.1/experiments/tactile-bench/OpenWorldTactile_v2_8.py,Python interpreter selection,PYTHON_BIN,active,Defaults to sys.executable and retains an explicit interpreter override.
+archive-isaaclab-2.3/packages/contrib/isaaclab_contrib/sensors/openworldtactile_sensor/visuotactile_sensor_cfg.py,External tactile asset mapping,OWT_ASSET_ROOT,active,Uses the OpenWorldTactile Nucleus location by default and permits an explicit external asset root.

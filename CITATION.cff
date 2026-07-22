@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use IsaacSim-Tactile4OpenWorld or its OpenWorldTactile framework, cite this software and the method papers listed in CITATIONS.md."
+title: "IsaacSim-Tactile4OpenWorld: the OpenWorldTactile simulation framework"
+type: software
+authors:
+  - name: "The OpenWorldTactile Project Developers"
+license: BSD-3-Clause
+keywords:
+  - tactile simulation
+  - robotics
+  - Isaac Lab
+  - visuotactile sensing
+  - contact simulation
+abstract: >-
+  An Isaac Sim and Isaac Lab research repository built around the
+  OpenWorldTactile framework for tactile and visuotactile simulation.

@@ -1,0 +1,655 @@
+# Copyright (c) 2022-2026, The Isaac Lab Project Developers.
+# All rights reserved.
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+# 中文说明：这个脚本演示两个竖直相对的 OpenWorldTactile/GelSight 触觉传感器夹合螺母，并在 Isaac Sim UI 中只实时展示左右触觉 RGB 和 RGB 输入 SDK 解算出的箭头图。
+
+"""Run a standalone two-finger OpenWorldTactile/GelSight clamp demo with live UI previews."""
+
+from __future__ import annotations
+
+"""Launch Isaac Sim Simulator first."""
+
+import argparse
+import math
+import os
+import sys
+from pathlib import Path
+
+from isaaclab.app import AppLauncher
+
+
+parser = argparse.ArgumentParser(description="Standalone dual OpenWorldTactile clamp demo with tactile RGB and SDK arrow UI.")
+parser.add_argument("--num_envs", type=int, default=1, help="Number of environments to spawn.")
+parser.add_argument("--env_id", type=int, default=0, help="Environment index to preview in the UI.")
+parser.add_argument("--ui_update_interval", type=int, default=2, help="Update the UI every N simulation frames.")
+parser.add_argument(
+    "--rgb_render_mode",
+    type=str,
+    choices=("openworldtactile", "gelsight"),
+    default="openworldtactile",
+    help="Tactile RGB render route.",
+)
+parser.add_argument("--sdk_baseline_frames", type=int, default=5, help="No-contact RGB frames used to calibrate SDK baseline.")
+parser.add_argument("--sdk_mode", type=int, default=0, help="OpenWorldTactile SDK update mode; 0 computes hue and flow.")
+parser.add_argument("--sdk_fx_p1", type=float, default=1.0, help="OpenWorldTactile SDK Fx calibration scale.")
+parser.add_argument("--sdk_fy_p1", type=float, default=1.0, help="OpenWorldTactile SDK Fy calibration scale.")
+parser.add_argument("--sdk_fz_p1", type=float, default=1.0, help="OpenWorldTactile SDK Fz calibration scale.")
+parser.add_argument("--sdk_fz_vis_limit", type=float, default=255.0, help="SDK hue/Fz value mapped to full gray intensity.")
+parser.add_argument("--sdk_arrow_step", type=int, default=25, help="Pixel step for SDK flow arrows.")
+parser.add_argument("--sdk_arrow_scale", type=float, default=1.0, help="Scale factor for SDK flow arrows.")
+parser.add_argument("--force_vis_limit", type=float, default=1.0e-4, help="Force value mapped to full UI intensity.")
+parser.add_argument("--force_map_scale", type=int, default=1, help="Deprecated; SDF FXYZ previews are not shown.")
+parser.add_argument("--baseline_warmup_steps", type=int, default=10, help="Physics steps before baseline capture.")
+parser.add_argument("--close_start_step", type=int, default=30, help="Frame index to start closing the tactile pads.")
+parser.add_argument("--close_duration", type=int, default=120, help="Frames used to close the tactile pads.")
+parser.add_argument(
+    "--hold_steps",
+    type=int,
+    default=-1,
+    help="Closed hold frames; negative uses --cycle_hold_steps in cyclic mode.",
+)
+parser.add_argument("--cycle_hold_steps", type=int, default=120, help="Closed hold frames used when --hold_steps is negative.")
+parser.add_argument("--open_duration", type=int, default=120, help="Frames used to reopen the tactile pads in cyclic mode.")
+parser.add_argument("--disable_cycle_grasp", action="store_true", help="Hold closed instead of repeating open-close cycles.")
+parser.add_argument("--open_half_gap", type=float, default=0.075, help="Open distance from center to each tactile surface.")
+parser.add_argument("--closed_half_gap", type=float, default=0.005, help="Closed distance from center to each tactile surface.")
+parser.add_argument("--surface_height", type=float, default=0.137, help="World Z height of the tactile surface centers.")
+parser.add_argument("--nut_height", type=float, default=0.120, help="World Z height of the nut center.")
+parser.add_argument(
+    "--gelsight_contact_center",
+    type=float,
+    nargs=3,
+    default=(0.0, -0.010, 0.06776),
+    help="GelSight local coordinates of the sensitive contact-center used for placement.",
+)
+parser.add_argument("--left_root_rpy", type=float, nargs=3, default=(0.0, math.pi, math.pi), help="Left OpenWorldTactile root RPY.")
+parser.add_argument("--right_root_rpy", type=float, nargs=3, default=(0.0, math.pi, 0.0), help="Right OpenWorldTactile root RPY.")
+parser.add_argument(
+    "--pad_surface_offset",
+    type=float,
+    default=0.06776,
+    help="Deprecated compatibility argument; placement now uses --gelsight_contact_center.",
+)
+parser.add_argument(
+    "--pad_surface_z_offset",
+    type=float,
+    default=0.002,
+    help="Deprecated compatibility argument; placement now uses --gelsight_contact_center.",
+)
+parser.add_argument("--normal_contact_stiffness", type=float, default=1.0, help="Tactile normal stiffness.")
+parser.add_argument("--tangential_stiffness", type=float, default=0.1, help="Tactile tangential stiffness.")
+parser.add_argument("--friction_coefficient", type=float, default=2.0, help="Tactile friction coefficient.")
+parser.add_argument(
+    "--tactile_compliance_stiffness",
+    type=float,
+    default=None,
+    help="Optional compliant contact stiffness override for the elastomer.",
+)
+parser.add_argument(
+    "--tactile_compliant_damping",
+    type=float,
+    default=None,
+    help="Optional compliant contact damping override for the elastomer.",
+)
+
+AppLauncher.add_app_launcher_args(parser)
+args_cli = parser.parse_args()
+
+if getattr(args_cli, "headless", False) or os.environ.get("HEADLESS", "0") not in ("", "0", "False", "false"):
+    parser.error("This demo requires the Isaac Sim UI. Run without --headless and with HEADLESS=0.")
+
+args_cli.enable_cameras = True
+
+app_launcher = AppLauncher(args_cli)
+simulation_app = app_launcher.app
+
+"""Rest everything follows."""
+
+import numpy as np
+import torch
+
+import isaaclab.sim as sim_utils
+from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
+from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
+from isaaclab.sensors import TiledCameraCfg
+from isaaclab.utils import configclass
+from isaaclab.utils.assets import ISAACLAB_NUCLEUS_DIR
+
+from isaaclab_contrib.sensors.openworldtactile_sensor import OWT_ASSET_ROOT, VisuoTactileSensorCfg
+
+from isaaclab_assets.sensors import GELSIGHT_R15_CFG
+
+
+def find_sdk_root() -> Path:
+    """Find the bundled OpenWorldTactile SDK used for RGB-to-force decoding."""
+    for parent in Path(__file__).resolve().parents:
+        sdk_root = parent / "hardware-sdk/openworldtactile"
+        if (sdk_root / "api" / "isaaclab_openworldtactile_bridge.py").exists():
+            return sdk_root
+    raise RuntimeError("Could not find hardware-sdk/openworldtactile from this script path.")
+
+
+SDK_ROOT = find_sdk_root()
+if str(SDK_ROOT) not in sys.path:
+    sys.path.insert(0, str(SDK_ROOT))
+
+from api import IsaacLabOpenWorldTactileBridge
+
+
+TACTILE_ROWS = 20
+TACTILE_COLS = 25
+WINDOW_TITLE = "Dual OpenWorldTactile Clamp RGB / SDK Arrows"
+
+
+def quat_from_rpy(rpy: tuple[float, float, float]) -> tuple[float, float, float, float]:
+    """Convert XYZ Euler angles to a wxyz quaternion."""
+    roll, pitch, yaw = rpy
+    cy = math.cos(yaw * 0.5)
+    sy = math.sin(yaw * 0.5)
+    cr = math.cos(roll * 0.5)
+    sr = math.sin(roll * 0.5)
+    cp = math.cos(pitch * 0.5)
+    sp = math.sin(pitch * 0.5)
+    return (
+        cy * cr * cp + sy * sr * sp,
+        cy * sr * cp - sy * cr * sp,
+        cy * cr * sp + sy * sr * cp,
+        sy * cr * cp - cy * sr * sp,
+    )
+
+
+def quat_apply_xyz(quat: tuple[float, float, float, float], vec: tuple[float, float, float]) -> tuple[float, float, float]:
+    """Rotate a vector by a wxyz quaternion."""
+    w, x, y, z = quat
+    vx, vy, vz = vec
+    tx = 2.0 * (y * vz - z * vy)
+    ty = 2.0 * (z * vx - x * vz)
+    tz = 2.0 * (x * vy - y * vx)
+    return (
+        vx + w * tx + y * tz - z * ty,
+        vy + w * ty + z * tx - x * tz,
+        vz + w * tz + x * ty - y * tx,
+    )
+
+
+LEFT_SENSOR_QUAT = quat_from_rpy(tuple(args_cli.left_root_rpy))
+RIGHT_SENSOR_QUAT = quat_from_rpy(tuple(args_cli.right_root_rpy))
+GELSIGHT_CONTACT_CENTER = tuple(args_cli.gelsight_contact_center)
+
+
+class DualTactilePreviewWindow:
+    """In-app UI for left/right tactile RGB and SDK arrow previews."""
+
+    def __init__(self, rgb_height: int, rgb_width: int):
+        import omni.ui as ui
+
+        self._ui = ui
+        self._sdk_height = rgb_height
+        self._sdk_width = rgb_width
+
+        self._left_rgb_provider = ui.ByteImageProvider()
+        self._right_rgb_provider = ui.ByteImageProvider()
+        self._left_sdk_fxyz_provider = ui.ByteImageProvider()
+        self._right_sdk_fxyz_provider = ui.ByteImageProvider()
+        self._status_label = None
+
+        self._update_provider(self._left_rgb_provider, np.zeros((rgb_height, rgb_width, 3), dtype=np.uint8))
+        self._update_provider(self._right_rgb_provider, np.zeros((rgb_height, rgb_width, 3), dtype=np.uint8))
+        zero_sdk = np.zeros((self._sdk_height, self._sdk_width, 3), dtype=np.uint8)
+        self._update_provider(self._left_sdk_fxyz_provider, zero_sdk)
+        self._update_provider(self._right_sdk_fxyz_provider, zero_sdk)
+
+        panel_width = rgb_width
+        window_width = panel_width * 2 + 90
+        window_height = rgb_height + self._sdk_height + 120
+        self._window = ui.Window(
+            WINDOW_TITLE,
+            width=window_width,
+            height=window_height,
+            visible=True,
+            dock_preference=ui.DockPreference.RIGHT_TOP,
+        )
+
+        with self._window.frame:
+            with ui.VStack(spacing=8, height=0):
+                self._status_label = ui.Label("Waiting for dual tactile clamp data...", height=22)
+                with ui.HStack(spacing=12, height=rgb_height + 26):
+                    self._build_image_column(ui, "LEFT RGB", self._left_rgb_provider, panel_width, rgb_height)
+                    self._build_image_column(ui, "RIGHT RGB", self._right_rgb_provider, panel_width, rgb_height)
+                with ui.HStack(spacing=12, height=self._sdk_height + 26):
+                    self._build_image_column(
+                        ui, "LEFT SDK ARROWS", self._left_sdk_fxyz_provider, self._sdk_width, self._sdk_height
+                    )
+                    self._build_image_column(
+                        ui, "RIGHT SDK ARROWS", self._right_sdk_fxyz_provider, self._sdk_width, self._sdk_height
+                    )
+
+        workspace_window = ui.Workspace.get_window(WINDOW_TITLE)
+        if workspace_window is not None:
+            workspace_window.focus()
+
+    @staticmethod
+    def _build_image_column(ui, title: str, provider, width: int, height: int):
+        with ui.VStack(spacing=4, width=width):
+            ui.Label(title, height=22, alignment=ui.Alignment.CENTER)
+            with ui.Frame(width=width, height=height):
+                ui.ImageWithProvider(provider)
+
+    @staticmethod
+    def _to_rgba(image: np.ndarray) -> np.ndarray:
+        image = np.asarray(image)
+        height, width = image.shape[:2]
+        rgba = np.empty((height, width, 4), dtype=np.uint8)
+        if image.ndim == 2:
+            rgba[..., 0] = image
+            rgba[..., 1] = image
+            rgba[..., 2] = image
+        else:
+            rgba[..., :3] = image[..., :3]
+        rgba[..., 3] = 255
+        return np.ascontiguousarray(rgba)
+
+    def _update_provider(self, provider, image: np.ndarray):
+        rgba = self._to_rgba(image)
+        provider.set_bytes_data(rgba.flatten().data, [rgba.shape[1], rgba.shape[0]])
+
+    def update(
+        self,
+        left_rgb: np.ndarray,
+        right_rgb: np.ndarray,
+        left_sdk_fxyz: np.ndarray,
+        right_sdk_fxyz: np.ndarray,
+        frame_id: int,
+        phase: str,
+    ):
+        self._update_provider(self._left_rgb_provider, left_rgb)
+        self._update_provider(self._right_rgb_provider, right_rgb)
+        self._update_provider(self._left_sdk_fxyz_provider, left_sdk_fxyz)
+        self._update_provider(self._right_sdk_fxyz_provider, right_sdk_fxyz)
+        self._status_label.text = f"Frame: {frame_id} | phase={phase} | SDK: gray=Fz, arrows=Fx/Fy"
+
+
+def make_openworldtactile_pad_cfg(prim_path: str, pos: tuple[float, float, float], rot: tuple[float, float, float, float]):
+    """Create a OpenWorldTactile/GelSight finger asset with explicit empty joint state."""
+    return ArticulationCfg(
+        prim_path=prim_path,
+        spawn=sim_utils.UsdFileWithCompliantContactCfg(
+            usd_path=f"{OWT_ASSET_ROOT}/gelsight_r15_finger/gelsight_r15_finger.usd",
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(disable_gravity=True, max_depenetration_velocity=5.0),
+            compliant_contact_stiffness=args_cli.tactile_compliance_stiffness,
+            compliant_contact_damping=args_cli.tactile_compliant_damping,
+            physics_material_prim_path="elastomer",
+            articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+                enabled_self_collisions=False,
+                solver_position_iteration_count=12,
+                solver_velocity_iteration_count=1,
+            ),
+            collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.001, rest_offset=-0.0005),
+        ),
+        init_state=ArticulationCfg.InitialStateCfg(pos=pos, rot=rot, joint_pos={}, joint_vel={}),
+        actuators={},
+    )
+
+
+def make_tactile_sensor_cfg(root_prim_path: str) -> VisuoTactileSensorCfg:
+    """Create a OpenWorldTactile tactile RGB/force-field sensor config for one pad."""
+    return VisuoTactileSensorCfg(
+        prim_path=f"{root_prim_path}/elastomer/tactile_sensor",
+        history_length=0,
+        debug_vis=False,
+        render_cfg=GELSIGHT_R15_CFG.replace(
+            openworldtactile_max_pressure=6e-4,
+            openworldtactile_base_value=220,
+            openworldtactile_pressure_blur=5,
+            openworldtactile_displacement_scale=12000.0,
+        ),
+        enable_camera_tactile=True,
+        rgb_render_mode=args_cli.rgb_render_mode,
+        enable_force_field=True,
+        tactile_array_size=(TACTILE_ROWS, TACTILE_COLS),
+        tactile_margin=0.003,
+        contact_object_prim_path_expr="{ENV_REGEX_NS}/contact_object",
+        normal_contact_stiffness=args_cli.normal_contact_stiffness,
+        friction_coefficient=args_cli.friction_coefficient,
+        tangential_stiffness=args_cli.tangential_stiffness,
+        camera_cfg=TiledCameraCfg(
+            prim_path=f"{root_prim_path}/elastomer_tip/cam",
+            height=GELSIGHT_R15_CFG.image_height,
+            width=GELSIGHT_R15_CFG.image_width,
+            data_types=["distance_to_image_plane"],
+            spawn=None,
+        ),
+    )
+
+
+def root_pos_from_surface_center(
+    surface_center: tuple[float, float, float], root_quat: tuple[float, float, float, float]
+) -> tuple[float, float, float]:
+    """Convert a desired sensitive-surface center to the OpenWorldTactile root position."""
+    contact_offset_w = quat_apply_xyz(root_quat, GELSIGHT_CONTACT_CENTER)
+    return tuple(surface_center[i] - contact_offset_w[i] for i in range(3))
+
+
+def left_root_pos_from_surface(half_gap: float) -> tuple[float, float, float]:
+    """Convert left desired surface center to GelSight root position."""
+    return root_pos_from_surface_center((0.0, -half_gap, args_cli.surface_height), LEFT_SENSOR_QUAT)
+
+
+def right_root_pos_from_surface(half_gap: float) -> tuple[float, float, float]:
+    """Convert right desired surface center to GelSight root position."""
+    return root_pos_from_surface_center((0.0, half_gap, args_cli.surface_height), RIGHT_SENSOR_QUAT)
+
+
+@configclass
+class DualOpenWorldTactileClampSceneCfg(InteractiveSceneCfg):
+    """Scene with two vertical OpenWorldTactile pads and one nut between them."""
+
+    ground = AssetBaseCfg(prim_path="/World/defaultGroundPlane", spawn=sim_utils.GroundPlaneCfg())
+
+    dome_light = AssetBaseCfg(
+        prim_path="/World/Light", spawn=sim_utils.DomeLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75))
+    )
+
+    contact_object = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/contact_object",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=f"{ISAACLAB_NUCLEUS_DIR}/Factory/factory_nut_m16.usd",
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                disable_gravity=True,
+                solver_position_iteration_count=12,
+                solver_velocity_iteration_count=1,
+                max_angular_velocity=180.0,
+            ),
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.1),
+            collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.005, rest_offset=0.0),
+            articulation_props=sim_utils.ArticulationRootPropertiesCfg(articulation_enabled=False),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(pos=(0.0, 0.0, args_cli.nut_height), rot=(1.0, 0.0, 0.0, 0.0)),
+    )
+
+    left_tactile_pad = make_openworldtactile_pad_cfg(
+        "{ENV_REGEX_NS}/LeftOpenWorldTactile",
+        left_root_pos_from_surface(args_cli.open_half_gap),
+        LEFT_SENSOR_QUAT,
+    )
+
+    right_tactile_pad = make_openworldtactile_pad_cfg(
+        "{ENV_REGEX_NS}/RightOpenWorldTactile",
+        right_root_pos_from_surface(args_cli.open_half_gap),
+        RIGHT_SENSOR_QUAT,
+    )
+
+    left_tactile_sensor = make_tactile_sensor_cfg("{ENV_REGEX_NS}/LeftOpenWorldTactile")
+    right_tactile_sensor = make_tactile_sensor_cfg("{ENV_REGEX_NS}/RightOpenWorldTactile")
+
+
+def tensor_rgb_to_numpy(rgb_tensor: torch.Tensor, env_id: int) -> np.ndarray:
+    """Convert one tactile RGB tensor to a uint8 numpy image."""
+    rgb = rgb_tensor[env_id].detach().cpu().numpy()
+    if rgb.dtype != np.uint8:
+        rgb = (rgb * 255).astype(np.uint8) if rgb.max() <= 1.0 else rgb.astype(np.uint8)
+    return np.ascontiguousarray(rgb)
+
+
+def empty_force_summary() -> dict[str, float | int]:
+    """Return a zero force summary matching the UI label schema."""
+    return {"fx_sum": 0.0, "fy_sum": 0.0, "fz_sum": 0.0, "fz_max": 0.0, "active_taxels": 0}
+
+
+def safe_force_value(value: float | None) -> float:
+    """Convert SDK force values to finite floats for labels."""
+    if value is None:
+        return 0.0
+    value = float(value)
+    return value if np.isfinite(value) else 0.0
+
+
+def make_sdk_bridge() -> IsaacLabOpenWorldTactileBridge:
+    """Create one in-memory RGB-to-SDK-force bridge without file outputs."""
+    return IsaacLabOpenWorldTactileBridge(
+        fx_p1=args_cli.sdk_fx_p1,
+        fy_p1=args_cli.sdk_fy_p1,
+        fz_p1=args_cli.sdk_fz_p1,
+        baseline_frames=args_cli.sdk_baseline_frames,
+        mode=args_cli.sdk_mode,
+        save_input_rgb=False,
+        record_buffer_size=None,
+    )
+
+
+def build_sdk_fxyz_preview(
+    bridge: IsaacLabOpenWorldTactileBridge,
+    rgb_image: np.ndarray,
+    fz_vis_limit: float,
+    arrow_step: int,
+    arrow_scale: float,
+) -> tuple[np.ndarray, dict[str, float | int]]:
+    """Feed native-size RGB into the SDK and visualize native-size Fz plus Fx/Fy arrows."""
+    # SDK 输入、baseline、hue/flow 输出都保持 RGB 原始尺寸；这里只画图，不做 resize/旋转。
+    force = bridge.update(rgb_image)
+    zero_image = np.zeros((*rgb_image.shape[:2], 3), dtype=np.uint8)
+    if force is None:
+        return zero_image, empty_force_summary()
+
+    pressure_matrix = bridge.sensor.get_hue_matrix()
+    flow_matrix = bridge.sensor.get_flow_matrix()
+    if pressure_matrix is None:
+        return zero_image, empty_force_summary()
+
+    limit = max(float(fz_vis_limit), 1.0e-12)
+    pressure = np.asarray(pressure_matrix, dtype=np.float32)
+    gray = np.uint8(np.clip(np.maximum(pressure, 0.0) / limit, 0.0, 1.0) * 255.0)
+    image = np.repeat(gray[..., None], 3, axis=2)
+
+    if flow_matrix is not None:
+        arrows = bridge.functions.flow_to_arrow_segments(
+            flow_matrix,
+            step=max(1, int(arrow_step)),
+            scale=float(arrow_scale),
+        )
+        arrow_mask = np.any(arrows > 0, axis=2)
+        image[arrow_mask] = arrows[arrow_mask]
+
+    active = int(np.count_nonzero(pressure > limit * 0.05))
+    summary = {
+        "fx_sum": safe_force_value(force[0]),
+        "fy_sum": safe_force_value(force[1]),
+        "fz_sum": safe_force_value(force[2]),
+        "fz_max": float(np.max(pressure)) if pressure.size > 0 else 0.0,
+        "active_taxels": active,
+    }
+    return image, summary
+
+
+def write_pad_root_state(scene: InteractiveScene, asset_name: str, pos: torch.Tensor, quat: torch.Tensor):
+    """Write one tactile pad root state with zero velocity."""
+    root_state = scene[asset_name].data.default_root_state.clone()
+    root_state[:, :3] = pos
+    root_state[:, 3:7] = quat
+    root_state[:, 7:] = 0.0
+    scene[asset_name].write_root_state_to_sim(root_state)
+
+
+def reset_object_to_center(scene: InteractiveScene):
+    """Reset the nut to the middle of the clamp."""
+    root_state = scene["contact_object"].data.default_root_state.clone()
+    root_state[:, :3] += scene.env_origins
+    root_state[:, 7:] = 0.0
+    scene["contact_object"].write_root_state_to_sim(root_state)
+    scene["contact_object"].reset()
+
+
+def set_pad_half_gap(scene: InteractiveScene, half_gap: float):
+    """Move both tactile pads so their sensitive surfaces are separated by 2 * half_gap."""
+    device = scene.device
+    num_envs = scene.num_envs
+    env_origins = scene.env_origins
+    left_pos = torch.tensor(left_root_pos_from_surface(half_gap), dtype=torch.float32, device=device).repeat(num_envs, 1)
+    right_pos = torch.tensor(right_root_pos_from_surface(half_gap), dtype=torch.float32, device=device).repeat(num_envs, 1)
+    left_pos += env_origins
+    right_pos += env_origins
+    left_quat = torch.tensor(LEFT_SENSOR_QUAT, dtype=torch.float32, device=device).repeat(num_envs, 1)
+    right_quat = torch.tensor(RIGHT_SENSOR_QUAT, dtype=torch.float32, device=device).repeat(num_envs, 1)
+    write_pad_root_state(scene, "left_tactile_pad", left_pos, left_quat)
+    write_pad_root_state(scene, "right_tactile_pad", right_pos, right_quat)
+
+
+def warmup_without_sensor_update(sim: sim_utils.SimulationContext, scene: InteractiveScene, steps: int):
+    """Step physics without updating tactile sensors before the baseline exists."""
+    sim_dt = sim.get_physics_dt()
+    for _ in range(max(0, steps)):
+        set_pad_half_gap(scene, args_cli.open_half_gap)
+        scene.write_data_to_sim()
+        sim.step()
+        scene["left_tactile_pad"].update(sim_dt)
+        scene["right_tactile_pad"].update(sim_dt)
+        scene["contact_object"].update(sim_dt)
+
+
+def capture_tactile_baselines(sim: sim_utils.SimulationContext, scene: InteractiveScene):
+    """Capture no-contact RGB baselines for both tactile pads."""
+    reset_object_to_center(scene)
+    set_pad_half_gap(scene, args_cli.open_half_gap)
+    warmup_without_sensor_update(sim, scene, args_cli.baseline_warmup_steps)
+    scene["left_tactile_sensor"].get_initial_render()
+    scene["right_tactile_sensor"].get_initial_render()
+
+
+def active_hold_steps() -> int:
+    """Return closed hold duration for the current run mode."""
+    if args_cli.hold_steps >= 0:
+        return max(0, args_cli.hold_steps)
+    return max(0, args_cli.cycle_hold_steps)
+
+
+def clamp_cycle_steps() -> int:
+    """Return total frames in one cyclic open-close-open grasp."""
+    return (
+        max(0, args_cli.close_start_step)
+        + max(1, args_cli.close_duration)
+        + active_hold_steps()
+        + max(1, args_cli.open_duration)
+    )
+
+
+def clamp_phase(frame_count: int) -> tuple[float, str]:
+    """Return current half gap and phase label."""
+    if frame_count < args_cli.close_start_step:
+        return args_cli.open_half_gap, "open-baseline"
+
+    cycle_frame = frame_count - max(0, args_cli.close_start_step)
+    alpha = min(1.0, cycle_frame / max(1, args_cli.close_duration))
+    half_gap = args_cli.open_half_gap + alpha * (args_cli.closed_half_gap - args_cli.open_half_gap)
+    if alpha < 1.0:
+        return half_gap, "closing"
+
+    cycle_frame -= max(1, args_cli.close_duration)
+    hold_steps = active_hold_steps()
+    if args_cli.disable_cycle_grasp or cycle_frame < hold_steps:
+        return args_cli.closed_half_gap, "holding"
+
+    cycle_frame -= hold_steps
+    alpha = min(1.0, cycle_frame / max(1, args_cli.open_duration))
+    half_gap = args_cli.closed_half_gap + alpha * (args_cli.open_half_gap - args_cli.closed_half_gap)
+    return half_gap, "opening"
+
+
+def next_cycle_frame(sim: sim_utils.SimulationContext, scene: InteractiveScene, frame_count: int) -> int:
+    """Advance cyclic grasp state and refresh the baseline at the start of each new cycle."""
+    next_frame = frame_count + 1
+    if args_cli.disable_cycle_grasp:
+        return next_frame
+
+    if next_frame >= clamp_cycle_steps():
+        capture_tactile_baselines(sim, scene)
+        return 0
+    return next_frame
+
+
+def run_simulator(sim: sim_utils.SimulationContext, scene: InteractiveScene):
+    """Run the standalone dual tactile clamp and update the UI."""
+    sim_dt = sim.get_physics_dt()
+    env_id = min(max(0, args_cli.env_id), scene.num_envs - 1)
+    ui_update_interval = max(1, args_cli.ui_update_interval)
+    preview_window = DualTactilePreviewWindow(
+        rgb_height=GELSIGHT_R15_CFG.image_height,
+        rgb_width=GELSIGHT_R15_CFG.image_width,
+    )
+    left_sdk_bridge = make_sdk_bridge()
+    right_sdk_bridge = make_sdk_bridge()
+
+    capture_tactile_baselines(sim, scene)
+
+    frame_count = 0
+    total_frame_id = 0
+    while simulation_app.is_running():
+        half_gap, phase = clamp_phase(frame_count)
+        set_pad_half_gap(scene, half_gap)
+
+        scene.write_data_to_sim()
+        sim.step()
+        scene.update(sim_dt)
+
+        if total_frame_id % ui_update_interval == 0:
+            left_data = scene["left_tactile_sensor"].data
+            right_data = scene["right_tactile_sensor"].data
+            if (
+                left_data.tactile_rgb_image is not None
+                and right_data.tactile_rgb_image is not None
+            ):
+                left_rgb = tensor_rgb_to_numpy(left_data.tactile_rgb_image, env_id)
+                right_rgb = tensor_rgb_to_numpy(right_data.tactile_rgb_image, env_id)
+                left_sdk_fxyz, _left_sdk_summary = build_sdk_fxyz_preview(
+                    left_sdk_bridge,
+                    left_rgb,
+                    args_cli.sdk_fz_vis_limit,
+                    args_cli.sdk_arrow_step,
+                    args_cli.sdk_arrow_scale,
+                )
+                right_sdk_fxyz, _right_sdk_summary = build_sdk_fxyz_preview(
+                    right_sdk_bridge,
+                    right_rgb,
+                    args_cli.sdk_fz_vis_limit,
+                    args_cli.sdk_arrow_step,
+                    args_cli.sdk_arrow_scale,
+                )
+                preview_window.update(
+                    left_rgb,
+                    right_rgb,
+                    left_sdk_fxyz,
+                    right_sdk_fxyz,
+                    total_frame_id,
+                    phase,
+                )
+
+        frame_count = next_cycle_frame(sim, scene, frame_count)
+        total_frame_id += 1
+
+
+def main():
+    """Create the scene and start the standalone dual tactile clamp demo."""
+    sim_cfg = sim_utils.SimulationCfg(
+        dt=0.005,
+        device=args_cli.device,
+        physx=sim_utils.PhysxCfg(gpu_collision_stack_size=2**30),
+    )
+    sim = sim_utils.SimulationContext(sim_cfg)
+    sim.set_camera_view(
+        eye=[0.32, -0.42, args_cli.surface_height + 0.24],
+        target=[0.0, 0.0, args_cli.surface_height],
+    )
+
+    scene_cfg = DualOpenWorldTactileClampSceneCfg(num_envs=args_cli.num_envs, env_spacing=0.25)
+    scene = InteractiveScene(scene_cfg)
+
+    sim.reset()
+    print("[INFO]: Setup complete. Dual OpenWorldTactile clamp RGB/SDK arrow UI is live.")
+
+    run_simulator(sim, scene)
+
+
+if __name__ == "__main__":
+    main()
+    simulation_app.close()

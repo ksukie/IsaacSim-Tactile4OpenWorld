@@ -1,0 +1,1675 @@
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import sys
+import time
+import traceback
+import types
+from pathlib import Path
+from typing import Sequence
+
+import numpy as np
+
+from isaaclab.app import AppLauncher
+
+
+_OWT_REPO_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_PAD_USD = (
+    _OWT_REPO_ROOT
+    / "source"
+    / "openworldtactile_assets"
+    / "openworldtactile_assets"
+    / "data"
+    / "Sensors"
+    / "OpenWorldTactile"
+    / "UIPC_Pad.usda"
+)
+
+
+parser = argparse.ArgumentParser(
+    description=(
+        "V4.8 UIPC pad asset visual-contact bench. The pad contract and visual grid are read from "
+        "UIPC_Pad.usda, while a kinematic rigid object with geometry height-map texture presses a "
+        "runtime UIPC membrane. Outputs match the V4.6/V4.7 minimal data format."
+    )
+)
+parser.add_argument("--output_dir", type=str, default="/tmp/openworldtactile_uipc_v4_8_pad_asset_visual_contact")
+parser.add_argument("--workspace_dir", type=str, default="/tmp/openworldtactile_uipc_v4_8_workspace")
+parser.add_argument("--asset_usd", type=str, default=str(DEFAULT_PAD_USD))
+parser.add_argument("--use_pad_usd_asset", dest="use_pad_usd_asset", action="store_true", default=True)
+parser.add_argument("--no_use_pad_usd_asset", dest="use_pad_usd_asset", action="store_false")
+parser.add_argument(
+    "--membrane_source",
+    type=str,
+    default="asset_runtime_volume",
+    choices=("procedural", "asset_runtime_volume", "asset_sim_mesh"),
+)
+parser.add_argument("--video_fps", type=float, default=30.0)
+parser.add_argument("--preview_scale", type=int, default=4)
+parser.add_argument("--press_frames", type=int, default=30)
+parser.add_argument("--hold_frames", type=int, default=10)
+parser.add_argument("--rub_frames", type=int, default=30)
+parser.add_argument("--release_frames", type=int, default=30)
+parser.add_argument("--warmup_steps", type=int, default=30)
+parser.add_argument("--log_every", type=int, default=10)
+parser.add_argument("--physics_timing_warn_sec", type=float, default=2.0)
+parser.add_argument("--render_viewport", action="store_true")
+parser.add_argument("--render_every", type=int, default=1)
+parser.add_argument("--render_sleep_sec", type=float, default=0.0)
+parser.add_argument("--sim_hz", type=float, default=120.0)
+parser.add_argument("--membrane_width_mm", type=float, default=20.75)
+parser.add_argument("--membrane_length_mm", type=float, default=25.25)
+parser.add_argument("--membrane_thickness_mm", type=float, default=0.5)
+parser.add_argument("--front_segments_y", type=int, default=64)
+parser.add_argument("--front_segments_z", type=int, default=80)
+parser.add_argument("--thickness_segments", type=int, default=4)
+parser.add_argument("--visual_segments_y", type=int, default=64)
+parser.add_argument("--visual_segments_z", type=int, default=80)
+parser.add_argument("--indent_depth_mm", type=float, default=0.8)
+parser.add_argument("--initial_gap_mm", type=float, default=0.8)
+parser.add_argument("--rub_distance_mm", type=float, default=4.0)
+parser.add_argument("--rub_axis", type=str, default="y", choices=("y", "z"))
+parser.add_argument("--contact_shape", type=str, default="rectangle", choices=("rectangle", "ellipse"))
+parser.add_argument("--contact_width_mm", type=float, default=8.0)
+parser.add_argument("--contact_length_mm", type=float, default=10.0)
+parser.add_argument(
+    "--object_texture_type",
+    type=str,
+    default="weave",
+    choices=("none", "stripes", "grid", "weave", "bumps", "grooves", "random", "screw_thread"),
+)
+parser.add_argument("--object_texture_height_mm", type=float, default=0.12)
+parser.add_argument("--object_texture_pitch_mm", type=float, default=1.2)
+parser.add_argument("--object_texture_axis", type=str, default="z", choices=("y", "z"))
+parser.add_argument("--object_texture_seed", type=int, default=17)
+parser.add_argument("--object_texture_display_mode", type=str, default="contact", choices=("full", "contact", "pressure"))
+parser.add_argument("--object_texture_gray_invert", action="store_true")
+parser.add_argument("--screw_thread_angle_deg", type=float, default=35.0)
+parser.add_argument("--tool_shape", type=str, default="textured_patch", choices=("textured_patch", "threaded_cylinder"))
+parser.add_argument("--tool_surface_segments_y", type=int, default=33)
+parser.add_argument("--tool_surface_segments_z", type=int, default=41)
+parser.add_argument("--tool_thickness_mm", type=float, default=4.0)
+parser.add_argument("--screw_radius_mm", type=float, default=2.0)
+parser.add_argument("--screw_length_mm", type=float, default=12.0)
+parser.add_argument("--screw_thread_pitch_mm", type=float, default=1.2)
+parser.add_argument("--screw_thread_height_mm", type=float, default=0.18)
+parser.add_argument("--screw_radial_segments", type=int, default=32)
+parser.add_argument("--screw_length_segments", type=int, default=48)
+parser.add_argument("--screw_axis", type=str, default="z", choices=("y", "z"))
+parser.add_argument("--tool_tet_edge_length_r", type=float, default=1.0 / 10.0)
+parser.add_argument("--tool_tet_epsilon_r", type=float, default=1.0e-3)
+parser.add_argument("--tool_m_kappa_mpa", type=float, default=20.0)
+parser.add_argument("--tet_edge_length_r", type=float, default=1.0 / 48.0)
+parser.add_argument("--tet_epsilon_r", type=float, default=5.0e-4)
+parser.add_argument("--youngs_modulus_mpa", type=float, default=0.05)
+parser.add_argument("--poisson_rate", type=float, default=0.49)
+parser.add_argument("--mass_density", type=float, default=1050.0)
+parser.add_argument("--attachment_strength_ratio", type=float, default=500.0)
+parser.add_argument("--attachment_radius_mm", type=float, default=0.5)
+parser.add_argument("--uipc_contact_d_hat_mm", type=float, default=0.1)
+parser.add_argument("--uipc_contact_resistance_gpa", type=float, default=1.0)
+parser.add_argument("--friction_mu", type=float, default=0.8)
+parser.add_argument("--front_face_eps_mm", type=float, default=0.08)
+parser.add_argument("--back_face_eps_mm", type=float, default=0.08)
+parser.add_argument("--normal_gain_n_per_m3", type=float, default=3.0e7)
+parser.add_argument("--shear_fraction", type=float, default=0.35)
+parser.add_argument("--texture_gradient_shear_fraction", type=float, default=0.16)
+parser.add_argument("--pressure_threshold_mm", type=float, default=0.01)
+parser.add_argument("--fixed_fx_max", type=float, default=0.0)
+parser.add_argument("--fixed_fy_max", type=float, default=0.0)
+parser.add_argument("--fixed_fz_max", type=float, default=0.0)
+parser.add_argument("--mapping_error_warn_mm", type=float, default=0.6)
+parser.add_argument("--save_pressure_fxyz_rgb_debug", action="store_true")
+parser.add_argument("--visualize_object_texture", action="store_true")
+parser.add_argument("--object_texture_debug_lift_mm", type=float, default=0.03)
+parser.add_argument("--strict_sanity", action="store_true")
+AppLauncher.add_app_launcher_args(parser)
+args_cli = parser.parse_args()
+setattr(args_cli, "enable_cameras", False)
+if getattr(args_cli, "rendering_mode", None) is None:
+    args_cli.rendering_mode = "performance"
+
+app_launcher = AppLauncher(args_cli)
+simulation_app = app_launcher.app
+
+
+import cv2
+import isaaclab.sim as sim_utils
+import omni.usd
+import torch
+from isaaclab.assets import RigidObject, RigidObjectCfg
+from isaaclab.sim import PhysxCfg, SimulationCfg
+from isaaclab.sim.schemas.schemas_cfg import RigidBodyPropertiesCfg
+from pxr import Gf, Sdf, Usd, UsdGeom
+
+
+_OWT_UIPC_SOURCE = _OWT_REPO_ROOT / "source" / "openworldtactile_uipc"
+if _OWT_UIPC_SOURCE.exists() and str(_OWT_UIPC_SOURCE) not in sys.path:
+    sys.path.append(str(_OWT_UIPC_SOURCE))
+
+
+def _install_debug_draw_compat() -> None:
+    try:
+        import isaacsim.util.debug_draw  # noqa: F401
+
+        return
+    except ModuleNotFoundError:
+        pass
+
+    class _NoOpDebugDraw:
+        def clear_points(self):
+            pass
+
+        def clear_lines(self):
+            pass
+
+        def draw_points(self, *args, **kwargs):
+            pass
+
+        def draw_lines(self, *args, **kwargs):
+            pass
+
+    debug_draw_module = types.ModuleType("isaacsim.util.debug_draw")
+    debug_draw_module._debug_draw = types.SimpleNamespace(
+        acquire_debug_draw_interface=lambda: _NoOpDebugDraw()
+    )
+    sys.modules.setdefault("isaacsim.util", types.ModuleType("isaacsim.util"))
+    sys.modules["isaacsim.util.debug_draw"] = debug_draw_module
+
+
+_install_debug_draw_compat()
+
+from openworldtactile_uipc import UipcIsaacAttachments, UipcIsaacAttachmentsCfg, UipcObject, UipcObjectCfg, UipcSim, UipcSimCfg
+from openworldtactile_uipc.utils import TetMeshCfg
+
+
+EPS = 1.0e-12
+PAD_ASSET_ROOT = "/World/UIPC_Pad"
+PAD_ASSET_SIMULATION = f"{PAD_ASSET_ROOT}/simulation"
+PAD_ASSET_FALLBACK_VISUAL_TARGET = f"{PAD_ASSET_ROOT}/visual/membrane_camera_surface"
+MEMBRANE_ROOT = "/World/UIPC_Pad/Membrane"
+MEMBRANE_MESH = f"{MEMBRANE_ROOT}/mesh"
+TOOL_ROOT = "/World/TexturedTool"
+TOOL_MESH = f"{TOOL_ROOT}/mesh"
+TEXTURE_DEBUG_FRONT_PATH = f"{TOOL_ROOT}/texture_debug_front"
+ANCHOR_PATH = "/World/UIPC_Pad/MembraneAnchor"
+
+
+def _validate_args() -> None:
+    for name in (
+        "video_fps",
+        "sim_hz",
+        "membrane_width_mm",
+        "membrane_length_mm",
+        "membrane_thickness_mm",
+        "tool_thickness_mm",
+        "tool_tet_edge_length_r",
+        "tool_tet_epsilon_r",
+        "tool_m_kappa_mpa",
+        "tet_edge_length_r",
+        "tet_epsilon_r",
+        "youngs_modulus_mpa",
+        "mass_density",
+        "attachment_strength_ratio",
+        "attachment_radius_mm",
+        "uipc_contact_d_hat_mm",
+        "uipc_contact_resistance_gpa",
+        "contact_width_mm",
+        "contact_length_mm",
+        "screw_radius_mm",
+        "screw_length_mm",
+        "screw_thread_pitch_mm",
+        "screw_thread_height_mm",
+    ):
+        if float(getattr(args_cli, name)) <= 0.0:
+            parser.error(f"--{name} must be > 0.")
+    if not (-1.0 < float(args_cli.poisson_rate) < 0.5):
+        parser.error("--poisson_rate must be in (-1, 0.5).")
+    for name in (
+        "press_frames",
+        "hold_frames",
+        "rub_frames",
+        "release_frames",
+        "warmup_steps",
+        "front_segments_y",
+        "front_segments_z",
+        "visual_segments_y",
+        "visual_segments_z",
+        "tool_surface_segments_y",
+        "tool_surface_segments_z",
+        "screw_radial_segments",
+        "screw_length_segments",
+    ):
+        if int(getattr(args_cli, name)) < 0:
+            parser.error(f"--{name} must be >= 0.")
+    if int(args_cli.front_segments_y) < 2 or int(args_cli.front_segments_z) < 2:
+        parser.error("front segment counts must be >= 2.")
+    if int(args_cli.visual_segments_y) < 2 or int(args_cli.visual_segments_z) < 2:
+        parser.error("visual segment counts must be >= 2.")
+    if int(args_cli.tool_surface_segments_y) < 2 or int(args_cli.tool_surface_segments_z) < 2:
+        parser.error("tool surface segment counts must be >= 2.")
+    if int(args_cli.screw_radial_segments) < 8:
+        parser.error("--screw_radial_segments must be >= 8.")
+    if int(args_cli.screw_length_segments) < 2:
+        parser.error("--screw_length_segments must be >= 2.")
+    if _total_frames() <= 0:
+        parser.error("trajectory has zero frames.")
+
+
+def _smoothstep(t: float) -> float:
+    t = float(np.clip(t, 0.0, 1.0))
+    return t * t * (3.0 - 2.0 * t)
+
+
+def _smooth01(values: np.ndarray) -> np.ndarray:
+    values = np.clip(values, 0.0, 1.0)
+    return values * values * (3.0 - 2.0 * values)
+
+
+def _safe_phase_progress(index: int, count: int) -> float:
+    if count <= 1:
+        return 1.0
+    return float(index) / float(count - 1)
+
+
+def _total_frames() -> int:
+    return (
+        max(0, int(args_cli.press_frames))
+        + max(0, int(args_cli.hold_frames))
+        + max(0, int(args_cli.rub_frames))
+        + max(0, int(args_cli.release_frames))
+    )
+
+
+def _trajectory(frame_id: int) -> dict[str, object]:
+    press = max(0, int(args_cli.press_frames))
+    hold = max(0, int(args_cli.hold_frames))
+    rub = max(0, int(args_cli.rub_frames))
+    release = max(0, int(args_cli.release_frames))
+    depth_max = float(args_cli.indent_depth_mm) * 1.0e-3
+    gap = float(args_cli.initial_gap_mm) * 1.0e-3
+    rub_distance = float(args_cli.rub_distance_mm) * 1.0e-3
+    rub_start = -0.5 * rub_distance
+    rub_end = 0.5 * rub_distance
+
+    if frame_id < press:
+        phase_index = frame_id
+        phase_progress = _safe_phase_progress(phase_index, press)
+        depth = depth_max * _smoothstep(phase_progress)
+        clearance = gap * (1.0 - _smoothstep(phase_progress))
+        offset_y = rub_start if args_cli.rub_axis == "y" else 0.0
+        offset_z = rub_start if args_cli.rub_axis == "z" else 0.0
+        phase = "press"
+    elif frame_id < press + hold:
+        phase_index = frame_id - press
+        phase_progress = _safe_phase_progress(phase_index, hold)
+        depth = depth_max
+        clearance = 0.0
+        offset_y = rub_start if args_cli.rub_axis == "y" else 0.0
+        offset_z = rub_start if args_cli.rub_axis == "z" else 0.0
+        phase = "hold"
+    elif frame_id < press + hold + rub:
+        phase_index = frame_id - press - hold
+        phase_progress = _safe_phase_progress(phase_index, rub)
+        rub_progress = _smoothstep(phase_progress)
+        depth = depth_max
+        clearance = 0.0
+        offset_y = rub_start + rub_distance * rub_progress if args_cli.rub_axis == "y" else 0.0
+        offset_z = rub_start + rub_distance * rub_progress if args_cli.rub_axis == "z" else 0.0
+        phase = "rub"
+    else:
+        phase_index = frame_id - press - hold - rub
+        phase_progress = _safe_phase_progress(phase_index, release)
+        depth = depth_max * (1.0 - _smoothstep(phase_progress))
+        clearance = gap * _smoothstep(phase_progress)
+        offset_y = rub_end if args_cli.rub_axis == "y" else 0.0
+        offset_z = rub_end if args_cli.rub_axis == "z" else 0.0
+        phase = "release"
+
+    return {
+        "phase": phase,
+        "phase_index": int(phase_index),
+        "phase_progress": float(phase_progress),
+        "depth_m": float(depth),
+        "clearance_m": float(clearance),
+        "center_y_m": float(offset_y),
+        "center_z_m": float(offset_z),
+    }
+
+
+def _rigid_props(dynamic: bool) -> RigidBodyPropertiesCfg:
+    return RigidBodyPropertiesCfg(
+        solver_position_iteration_count=16,
+        solver_velocity_iteration_count=1,
+        max_angular_velocity=1000.0,
+        max_linear_velocity=1000.0,
+        max_depenetration_velocity=5.0,
+        kinematic_enabled=not dynamic,
+        disable_gravity=not dynamic,
+    )
+
+
+def _ensure_parent_xforms(stage: Usd.Stage, prim_path: str) -> None:
+    parts = prim_path.strip("/").split("/")[:-1]
+    current = ""
+    for part in parts:
+        current += "/" + part
+        if not stage.GetPrimAtPath(current).IsValid():
+            UsdGeom.Xform.Define(stage, current)
+
+
+def _write_triangle_mesh(
+    stage: Usd.Stage,
+    prim_path: str,
+    points: np.ndarray,
+    triangles: np.ndarray,
+    *,
+    color: tuple[float, float, float],
+    opacity: float,
+) -> UsdGeom.Mesh:
+    _ensure_parent_xforms(stage, prim_path)
+    mesh = UsdGeom.Mesh.Define(stage, prim_path)
+    mesh.CreatePointsAttr([Gf.Vec3f(float(x), float(y), float(z)) for x, y, z in points])
+    mesh.CreateFaceVertexCountsAttr([3] * len(triangles))
+    mesh.CreateFaceVertexIndicesAttr([int(i) for tri in triangles for i in tri])
+    mesh.CreateSubdivisionSchemeAttr().Set(UsdGeom.Tokens.none)
+    gprim = UsdGeom.Gprim(mesh.GetPrim())
+    gprim.CreateDisplayColorAttr().Set([Gf.Vec3f(float(color[0]), float(color[1]), float(color[2]))])
+    gprim.CreateDisplayOpacityAttr().Set([float(opacity)])
+    gprim.CreateDoubleSidedAttr().Set(True)
+    return mesh
+
+
+def _resolve_pad_asset_target_path(target_path: str) -> str:
+    text = str(target_path)
+    if text.startswith("/UIPC_Pad/"):
+        return PAD_ASSET_ROOT + text[len("/UIPC_Pad") :]
+    if text == "/UIPC_Pad":
+        return PAD_ASSET_ROOT
+    return text
+
+
+def _mesh_points(stage: Usd.Stage, prim_path: str) -> np.ndarray:
+    prim = stage.GetPrimAtPath(str(prim_path))
+    if not prim.IsValid():
+        raise RuntimeError(f"USD mesh prim does not exist: {prim_path}")
+    mesh = UsdGeom.Mesh(prim)
+    points = mesh.GetPointsAttr().Get()
+    if points is None:
+        raise RuntimeError(f"USD mesh prim has no points: {prim_path}")
+    return np.asarray([[float(p[0]), float(p[1]), float(p[2])] for p in points], dtype=np.float32)
+
+
+def _load_pad_asset_contract(stage: Usd.Stage, asset_usd: Path) -> dict[str, object]:
+    asset_path = Path(asset_usd).expanduser().resolve()
+    if not asset_path.exists():
+        raise FileNotFoundError(f"Pad asset USD not found: {asset_path}")
+
+    _ensure_parent_xforms(stage, PAD_ASSET_ROOT)
+    pad_prim = UsdGeom.Xform.Define(stage, PAD_ASSET_ROOT).GetPrim()
+    pad_prim.GetReferences().AddReference(str(asset_path))
+
+    root_prim = stage.GetPrimAtPath(PAD_ASSET_ROOT)
+    if not root_prim.IsValid():
+        raise RuntimeError(f"Could not load pad asset at {PAD_ASSET_ROOT}: {asset_path}")
+    custom_data = root_prim.GetCustomData()
+
+    def require_custom_float(name: str) -> float:
+        value = custom_data.get(name)
+        if value is None:
+            raise RuntimeError(f"Pad asset customData is missing {name}: {asset_path}")
+        return float(value)
+
+    width = require_custom_float("membrane_width_m")
+    length = require_custom_float("membrane_length_m")
+    thickness = require_custom_float("membrane_thickness_m")
+
+    visual_target = PAD_ASSET_FALLBACK_VISUAL_TARGET
+    simulation_prim = stage.GetPrimAtPath(PAD_ASSET_SIMULATION)
+    if simulation_prim.IsValid():
+        rel = simulation_prim.GetRelationship("uipc:visual_target")
+        targets = rel.GetTargets() if rel else []
+        if targets:
+            visual_target = _resolve_pad_asset_target_path(str(targets[0]))
+    visual_points = _mesh_points(stage, visual_target)
+
+    fixed_x_m = -thickness
+    selection_epsilon_m = max(thickness * 0.16, 1.0e-6)
+    fixed_prim = stage.GetPrimAtPath(f"{PAD_ASSET_SIMULATION}/fixed_node_set")
+    if fixed_prim.IsValid():
+        fixed_attr = fixed_prim.GetAttribute("fixed_x_m")
+        eps_attr = fixed_prim.GetAttribute("selection_epsilon_m")
+        fixed_value = fixed_attr.Get() if fixed_attr else None
+        eps_value = eps_attr.Get() if eps_attr else None
+        if fixed_value is not None:
+            fixed_x_m = float(fixed_value)
+        if eps_value is not None:
+            selection_epsilon_m = float(eps_value)
+
+    return {
+        "asset_usd": str(asset_path),
+        "asset_root": PAD_ASSET_ROOT,
+        "width_m": width,
+        "length_m": length,
+        "thickness_m": thickness,
+        "visual_target": visual_target,
+        "visual_points": visual_points,
+        "visual_point_count": int(visual_points.shape[0]),
+        "fixed_x_m": fixed_x_m,
+        "selection_epsilon_m": selection_epsilon_m,
+        "bridge_contract": str(custom_data.get("bridge_contract", "")),
+        "coordinate_frame": str(custom_data.get("coordinate_frame", "")),
+    }
+
+
+def _set_mesh_points(stage: Usd.Stage, prim_path: str, points: np.ndarray) -> None:
+    prim = stage.GetPrimAtPath(str(prim_path))
+    if not prim.IsValid():
+        raise RuntimeError(f"USD mesh prim does not exist: {prim_path}")
+    mesh = UsdGeom.Mesh(prim)
+    mesh.GetPointsAttr().Set([Gf.Vec3f(float(x), float(y), float(z)) for x, y, z in points])
+
+
+def _height_values_to_rgb01(height_norm: np.ndarray) -> np.ndarray:
+    scalar = (np.clip(np.asarray(height_norm, dtype=np.float32), 0.0, 1.0) * 255.0).astype(np.uint8)
+    color_rgb = cv2.cvtColor(cv2.applyColorMap(scalar.reshape(-1, 1), cv2.COLORMAP_TURBO), cv2.COLOR_BGR2RGB)
+    return color_rgb.reshape(-1, 3).astype(np.float32) / 255.0
+
+
+def _write_colored_tool_texture_debug_mesh(
+    stage: Usd.Stage,
+    prim_path: str,
+    points: np.ndarray,
+    triangles: np.ndarray,
+    height_norm: np.ndarray,
+) -> UsdGeom.Mesh:
+    _ensure_parent_xforms(stage, prim_path)
+    mesh = UsdGeom.Mesh.Define(stage, prim_path)
+    mesh.CreatePointsAttr([Gf.Vec3f(float(x), float(y), float(z)) for x, y, z in points])
+    mesh.CreateFaceVertexCountsAttr([3] * len(triangles))
+    mesh.CreateFaceVertexIndicesAttr([int(i) for tri in triangles for i in tri])
+    mesh.CreateSubdivisionSchemeAttr().Set(UsdGeom.Tokens.none)
+    mesh.GetPrim().CreateAttribute("primvars:displayColor", Sdf.ValueTypeNames.Color3fArray).Set(
+        [Gf.Vec3f(float(r), float(g), float(b)) for r, g, b in _height_values_to_rgb01(height_norm)]
+    )
+    mesh.GetPrim().CreateAttribute("primvars:displayColor:interpolation", Sdf.ValueTypeNames.Token).Set("vertex")
+    gprim = UsdGeom.Gprim(mesh.GetPrim())
+    gprim.CreateDisplayOpacityAttr().Set([1.0])
+    gprim.CreateDoubleSidedAttr().Set(True)
+    return mesh
+
+
+def _subdivided_box_surface(
+    *,
+    x_min: float,
+    x_max: float,
+    y_min: float,
+    y_max: float,
+    z_min: float,
+    z_max: float,
+    x_segments: int,
+    y_segments: int,
+    z_segments: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    points: list[tuple[float, float, float]] = []
+    triangles: list[tuple[int, int, int]] = []
+    point_index: dict[tuple[int, int, int], int] = {}
+
+    def add_point(point: tuple[float, float, float]) -> int:
+        key = tuple(int(round(v * 1.0e12)) for v in point)
+        if key not in point_index:
+            point_index[key] = len(points)
+            points.append(point)
+        return point_index[key]
+
+    def add_face(axis: str, fixed: float, a0: float, a1: float, b0: float, b1: float, na: int, nb: int, flip=False):
+        face_indices: list[list[int]] = []
+        for ib in range(nb + 1):
+            b = b0 + (b1 - b0) * ib / max(nb, 1)
+            row = []
+            for ia in range(na + 1):
+                a = a0 + (a1 - a0) * ia / max(na, 1)
+                if axis == "x":
+                    row.append(add_point((fixed, a, b)))
+                elif axis == "y":
+                    row.append(add_point((a, fixed, b)))
+                else:
+                    row.append(add_point((a, b, fixed)))
+            face_indices.append(row)
+        for ib in range(nb):
+            for ia in range(na):
+                i0 = face_indices[ib][ia]
+                i1 = face_indices[ib][ia + 1]
+                i2 = face_indices[ib + 1][ia]
+                i3 = face_indices[ib + 1][ia + 1]
+                if flip:
+                    triangles.extend(((i0, i2, i1), (i1, i2, i3)))
+                else:
+                    triangles.extend(((i0, i1, i2), (i1, i3, i2)))
+
+    add_face("x", x_min, y_min, y_max, z_min, z_max, y_segments, z_segments, flip=True)
+    add_face("x", x_max, y_min, y_max, z_min, z_max, y_segments, z_segments)
+    add_face("y", y_min, x_min, x_max, z_min, z_max, x_segments, z_segments)
+    add_face("y", y_max, x_min, x_max, z_min, z_max, x_segments, z_segments, flip=True)
+    add_face("z", z_min, x_min, x_max, y_min, y_max, x_segments, y_segments, flip=True)
+    add_face("z", z_max, x_min, x_max, y_min, y_max, x_segments, y_segments)
+    return np.asarray(points, dtype=np.float32), np.asarray(triangles, dtype=np.int32)
+
+
+def _surface_grid_points(width: float, length: float, y_segments: int, z_segments: int, x: float = 0.0) -> np.ndarray:
+    ys = np.linspace(-width / 2.0, width / 2.0, int(y_segments) + 1, dtype=np.float32)
+    zs = np.linspace(-length / 2.0, length / 2.0, int(z_segments) + 1, dtype=np.float32)
+    return np.asarray([(float(x), float(y), float(z)) for z in zs for y in ys], dtype=np.float32)
+
+
+def _object_height_texture(local_y: np.ndarray, local_z: np.ndarray) -> np.ndarray:
+    kind = str(args_cli.object_texture_type)
+    if kind == "none":
+        return np.zeros_like(local_y, dtype=np.float32)
+
+    pitch = max(float(args_cli.object_texture_pitch_mm) * 1.0e-3, 1.0e-9)
+    axis_coord = local_y if args_cli.object_texture_axis == "y" else local_z
+    wave_y = 0.5 + 0.5 * np.cos(2.0 * math.pi * local_y / pitch)
+    wave_z = 0.5 + 0.5 * np.cos(2.0 * math.pi * local_z / pitch)
+
+    if kind == "stripes":
+        height = 0.5 + 0.5 * np.cos(2.0 * math.pi * axis_coord / pitch)
+    elif kind == "grooves":
+        groove_coord = np.sin(math.pi * axis_coord / pitch)
+        height = np.exp(-0.5 * (groove_coord / 0.28) ** 2)
+    elif kind == "grid":
+        height = np.maximum(wave_y, wave_z)
+    elif kind == "weave":
+        diagonal = 0.5 + 0.5 * np.sin(2.0 * math.pi * (local_y + local_z) / (1.45 * pitch))
+        height = 0.34 * wave_y + 0.34 * wave_z + 0.22 * diagonal + 0.10 * (wave_y > wave_z).astype(np.float32)
+    elif kind == "screw_thread":
+        angle = math.radians(float(args_cli.screw_thread_angle_deg))
+        coord = math.cos(angle) * local_y + math.sin(angle) * local_z
+        wave = 0.5 + 0.5 * np.cos(2.0 * math.pi * coord / pitch)
+        height = np.power(wave, 2.0)
+    elif kind == "bumps":
+        dy = ((local_y + 0.5 * pitch) % pitch) - 0.5 * pitch
+        dz = ((local_z + 0.5 * pitch) % pitch) - 0.5 * pitch
+        sigma = 0.18 * pitch
+        height = np.exp(-0.5 * (dy * dy + dz * dz) / max(sigma * sigma, 1.0e-18))
+    elif kind == "random":
+        rng = np.random.default_rng(int(args_cli.object_texture_seed))
+        value = np.zeros_like(local_y, dtype=np.float32)
+        for _ in range(7):
+            theta = float(rng.uniform(0.0, 2.0 * math.pi))
+            freq = float(rng.uniform(0.65, 2.4))
+            phase = float(rng.uniform(0.0, 2.0 * math.pi))
+            amp = float(rng.uniform(0.20, 1.0))
+            coord = math.cos(theta) * local_y + math.sin(theta) * local_z
+            value += amp * np.sin(2.0 * math.pi * freq * coord / pitch + phase)
+        height = 0.5 + 0.5 * np.tanh(value / 2.0)
+    else:
+        raise ValueError(f"Unsupported object_texture_type: {kind}")
+
+    return np.clip(height.astype(np.float32), 0.0, 1.0)
+
+
+def _contact_mask(local_y: np.ndarray, local_z: np.ndarray) -> np.ndarray:
+    half_y = max(0.5 * float(args_cli.contact_width_mm) * 1.0e-3, 1.0e-9)
+    half_z = max(0.5 * float(args_cli.contact_length_mm) * 1.0e-3, 1.0e-9)
+    edge_width = 0.18
+    if args_cli.contact_shape == "ellipse":
+        normalized_distance = np.sqrt((local_y / half_y) ** 2 + (local_z / half_z) ** 2)
+    else:
+        normalized_distance = ((np.abs(local_y / half_y) ** 8) + (np.abs(local_z / half_z) ** 8)) ** (1.0 / 8.0)
+    value = np.clip((1.0 + edge_width - normalized_distance) / max(edge_width, 1.0e-9), 0.0, 1.0)
+    return (value * value * (3.0 - 2.0 * value)).astype(np.float32)
+
+
+def _threaded_cylinder_contact_mask(local_y: np.ndarray, local_z: np.ndarray) -> np.ndarray:
+    radius = float(args_cli.screw_radius_mm) * 1.0e-3
+    thread_height = float(args_cli.screw_thread_height_mm) * 1.0e-3
+    length = float(args_cli.screw_length_mm) * 1.0e-3
+    max_radius = max(radius + thread_height, 1.0e-9)
+    if args_cli.screw_axis == "z":
+        radial_coord = local_y
+        axis_coord = local_z
+    else:
+        radial_coord = local_z
+        axis_coord = local_y
+    radial_value = np.clip((1.08 * max_radius - np.abs(radial_coord)) / max(0.08 * max_radius, 1.0e-9), 0.0, 1.0)
+    axial_value = np.clip((0.56 * length - np.abs(axis_coord)) / max(0.06 * length, 1.0e-9), 0.0, 1.0)
+    return (_smooth01(radial_value) * _smooth01(axial_value)).astype(np.float32)
+
+
+def _threaded_cylinder_projected_height(local_y: np.ndarray, local_z: np.ndarray) -> np.ndarray:
+    radius = max(float(args_cli.screw_radius_mm) * 1.0e-3, 1.0e-9)
+    thread_height = max(float(args_cli.screw_thread_height_mm) * 1.0e-3, 0.0)
+    pitch = max(float(args_cli.screw_thread_pitch_mm) * 1.0e-3, 1.0e-9)
+    max_radius = radius + thread_height
+    if args_cli.screw_axis == "z":
+        radial_coord = local_y
+        axis_coord = local_z
+    else:
+        radial_coord = local_z
+        axis_coord = local_y
+
+    normalized = np.clip(radial_coord / max(max_radius, 1.0e-9), -1.0, 1.0)
+    theta = math.pi - np.arcsin(normalized)
+    phase = theta - 2.0 * math.pi * axis_coord / pitch
+    thread = 0.5 + 0.5 * np.cos(phase)
+    return np.power(thread, 2.0).astype(np.float32)
+
+
+def _tool_height_texture(local_y: np.ndarray, local_z: np.ndarray) -> np.ndarray:
+    if args_cli.tool_shape == "threaded_cylinder":
+        return _threaded_cylinder_projected_height(local_y, local_z)
+    return _object_height_texture(local_y, local_z)
+
+
+def _tool_contact_mask(local_y: np.ndarray, local_z: np.ndarray) -> np.ndarray:
+    if args_cli.tool_shape == "threaded_cylinder":
+        return _threaded_cylinder_contact_mask(local_y, local_z)
+    return _contact_mask(local_y, local_z)
+
+
+def _textured_tool_mesh() -> tuple[np.ndarray, np.ndarray, float, np.ndarray, np.ndarray, np.ndarray]:
+    width = float(args_cli.contact_width_mm) * 1.0e-3
+    length = float(args_cli.contact_length_mm) * 1.0e-3
+    thickness = float(args_cli.tool_thickness_mm) * 1.0e-3
+    texture_height = max(0.0, float(args_cli.object_texture_height_mm) * 1.0e-3)
+    ny = max(2, int(args_cli.tool_surface_segments_y))
+    nz = max(2, int(args_cli.tool_surface_segments_z))
+    ys = np.linspace(-width / 2.0, width / 2.0, ny + 1, dtype=np.float32)
+    zs = np.linspace(-length / 2.0, length / 2.0, nz + 1, dtype=np.float32)
+    grid_z, grid_y = np.meshgrid(zs, ys, indexing="ij")
+    height_norm = _object_height_texture(grid_y, grid_z)
+    protrusion = texture_height * height_norm
+    front = np.stack((-protrusion, grid_y, grid_z), axis=-1).reshape(-1, 3)
+    back = np.stack((np.full_like(protrusion, thickness), grid_y, grid_z), axis=-1).reshape(-1, 3)
+    points = np.concatenate((front, back), axis=0).astype(np.float32)
+
+    def idx(layer: int, iz: int, iy: int) -> int:
+        return layer * (ny + 1) * (nz + 1) + iz * (ny + 1) + iy
+
+    triangles: list[tuple[int, int, int]] = []
+    front_triangles: list[tuple[int, int, int]] = []
+    for iz in range(nz):
+        for iy in range(ny):
+            f00, f10 = idx(0, iz, iy), idx(0, iz, iy + 1)
+            f01, f11 = idx(0, iz + 1, iy), idx(0, iz + 1, iy + 1)
+            b00, b10 = idx(1, iz, iy), idx(1, iz, iy + 1)
+            b01, b11 = idx(1, iz + 1, iy), idx(1, iz + 1, iy + 1)
+            front_pair = ((f00, f01, f10), (f10, f01, f11))
+            front_triangles.extend(front_pair)
+            triangles.extend(front_pair)
+            triangles.extend(((b00, b10, b01), (b10, b11, b01)))
+    for iz in range(nz):
+        triangles.extend(((idx(0, iz, 0), idx(1, iz, 0), idx(0, iz + 1, 0)), (idx(0, iz + 1, 0), idx(1, iz, 0), idx(1, iz + 1, 0))))
+        triangles.extend(((idx(0, iz, ny), idx(0, iz + 1, ny), idx(1, iz, ny)), (idx(0, iz + 1, ny), idx(1, iz + 1, ny), idx(1, iz, ny))))
+    for iy in range(ny):
+        triangles.extend(((idx(0, 0, iy), idx(0, 0, iy + 1), idx(1, 0, iy)), (idx(0, 0, iy + 1), idx(1, 0, iy + 1), idx(1, 0, iy))))
+        triangles.extend(((idx(0, nz, iy), idx(1, nz, iy), idx(0, nz, iy + 1)), (idx(0, nz, iy + 1), idx(1, nz, iy), idx(1, nz, iy + 1))))
+    min_local_x = float(np.min(points[:, 0]))
+    return (
+        points,
+        np.asarray(triangles, dtype=np.int32),
+        min_local_x,
+        front.astype(np.float32),
+        np.asarray(front_triangles, dtype=np.int32),
+        height_norm.reshape(-1).astype(np.float32),
+    )
+
+
+def _threaded_cylinder_tool_mesh() -> tuple[np.ndarray, np.ndarray, float, np.ndarray, np.ndarray, np.ndarray]:
+    base_radius = float(args_cli.screw_radius_mm) * 1.0e-3
+    length = float(args_cli.screw_length_mm) * 1.0e-3
+    pitch = max(float(args_cli.screw_thread_pitch_mm) * 1.0e-3, 1.0e-9)
+    thread_height = float(args_cli.screw_thread_height_mm) * 1.0e-3
+    radial_segments = max(8, int(args_cli.screw_radial_segments))
+    length_segments = max(2, int(args_cli.screw_length_segments))
+    axis_values = np.linspace(-0.5 * length, 0.5 * length, length_segments + 1, dtype=np.float32)
+    theta_values = np.linspace(0.0, 2.0 * math.pi, radial_segments, endpoint=False, dtype=np.float32)
+
+    side_points: list[tuple[float, float, float]] = []
+    side_height: list[float] = []
+    for axis_coord in axis_values:
+        for theta in theta_values:
+            phase = float(theta) - 2.0 * math.pi * float(axis_coord) / pitch
+            thread = (0.5 + 0.5 * math.cos(phase)) ** 2.0
+            radius = base_radius + thread_height * thread
+            x = radius * math.cos(float(theta))
+            radial_other = radius * math.sin(float(theta))
+            if args_cli.screw_axis == "z":
+                point = (x, radial_other, float(axis_coord))
+            else:
+                point = (x, float(axis_coord), radial_other)
+            side_points.append(point)
+            side_height.append(float(thread))
+
+    def side_idx(ia: int, it: int) -> int:
+        return ia * radial_segments + (it % radial_segments)
+
+    side_triangles: list[tuple[int, int, int]] = []
+    for ia in range(length_segments):
+        for it in range(radial_segments):
+            i00 = side_idx(ia, it)
+            i10 = side_idx(ia, it + 1)
+            i01 = side_idx(ia + 1, it)
+            i11 = side_idx(ia + 1, it + 1)
+            side_triangles.extend(((i00, i01, i10), (i10, i01, i11)))
+
+    points = list(side_points)
+    triangles = list(side_triangles)
+    first_center = len(points)
+    last_center = first_center + 1
+    if args_cli.screw_axis == "z":
+        points.append((0.0, 0.0, float(axis_values[0])))
+        points.append((0.0, 0.0, float(axis_values[-1])))
+    else:
+        points.append((0.0, float(axis_values[0]), 0.0))
+        points.append((0.0, float(axis_values[-1]), 0.0))
+
+    last_axis = length_segments
+    for it in range(radial_segments):
+        triangles.append((first_center, side_idx(0, it + 1), side_idx(0, it)))
+        triangles.append((last_center, side_idx(last_axis, it), side_idx(last_axis, it + 1)))
+
+    points_np = np.asarray(points, dtype=np.float32)
+    min_local_x = float(np.min(points_np[:, 0]))
+    return (
+        points_np,
+        np.asarray(triangles, dtype=np.int32),
+        min_local_x,
+        np.asarray(side_points, dtype=np.float32),
+        np.asarray(side_triangles, dtype=np.int32),
+        np.asarray(side_height, dtype=np.float32),
+    )
+
+
+def _tool_mesh() -> tuple[np.ndarray, np.ndarray, float, np.ndarray, np.ndarray, np.ndarray]:
+    if args_cli.tool_shape == "threaded_cylinder":
+        return _threaded_cylinder_tool_mesh()
+    return _textured_tool_mesh()
+
+
+def _tool_offset_for_frame(frame_id: int, tool_min_local_x: float) -> np.ndarray:
+    traj = _trajectory(frame_id)
+    x = float(traj["clearance_m"]) - float(traj["depth_m"]) - float(tool_min_local_x)
+    return np.asarray((x, float(traj["center_y_m"]), float(traj["center_z_m"])), dtype=np.float32)
+
+
+def _translated_tool_vertices(tool: UipcObject, offset: np.ndarray, initial_offset: np.ndarray) -> torch.Tensor:
+    delta = torch.as_tensor(
+        np.asarray(offset, dtype=np.float32) - np.asarray(initial_offset, dtype=np.float32),
+        device=tool.init_vertex_pos.device,
+        dtype=tool.init_vertex_pos.dtype,
+    )
+    return tool.init_vertex_pos + delta
+
+
+def _front_back_indices(rest_surface: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    x = rest_surface[:, 0]
+    front_eps = float(args_cli.front_face_eps_mm) * 1.0e-3
+    back_eps = float(args_cli.back_face_eps_mm) * 1.0e-3
+    front = torch.nonzero(x >= torch.max(x) - front_eps, as_tuple=False).flatten()
+    back = torch.nonzero(x <= torch.min(x) + back_eps, as_tuple=False).flatten()
+    if front.numel() == 0:
+        raise RuntimeError("Could not identify UIPC membrane front surface vertices.")
+    if back.numel() == 0:
+        raise RuntimeError("Could not identify UIPC membrane back surface vertices.")
+    return front, back
+
+
+def _nearest_indices(src_points: np.ndarray, query_points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    src = torch.as_tensor(src_points[:, 1:3], dtype=torch.float32)
+    query = torch.as_tensor(query_points[:, 1:3], dtype=torch.float32)
+    distances = torch.cdist(query, src)
+    values, indices = torch.min(distances, dim=1)
+    return indices.cpu().numpy().astype(np.int64), values.cpu().numpy().astype(np.float32)
+
+
+def _make_visual_grid(width: float, length: float) -> np.ndarray:
+    return _surface_grid_points(width, length, int(args_cli.visual_segments_y), int(args_cli.visual_segments_z), x=0.0)
+
+
+def _make_grid_mapper(rest_points: np.ndarray) -> dict[str, object]:
+    y_values = np.round(rest_points[:, 1], 9)
+    z_values = np.round(rest_points[:, 2], 9)
+    unique_y = np.unique(y_values)
+    unique_z = np.unique(z_values)
+    y_to_idx = {float(v): i for i, v in enumerate(unique_y)}
+    z_to_idx = {float(v): i for i, v in enumerate(unique_z)}
+    iy = np.asarray([y_to_idx[float(v)] for v in y_values], dtype=np.int64)
+    iz = np.asarray([z_to_idx[float(v)] for v in z_values], dtype=np.int64)
+    return {"shape": (int(len(unique_z)), int(len(unique_y))), "iy": iy, "iz": iz}
+
+
+def _vertex_values_to_grid(mapper: dict[str, object], values: np.ndarray) -> np.ndarray:
+    values_np = np.asarray(values)
+    height, width = mapper["shape"]
+    iy = mapper["iy"]
+    iz = mapper["iz"]
+    if values_np.ndim == 1:
+        grid = np.zeros((height, width), dtype=values_np.dtype)
+        grid[iz, iy] = values_np
+        return grid
+    grid = np.zeros((height, width, values_np.shape[-1]), dtype=values_np.dtype)
+    grid[iz, iy] = values_np
+    return grid
+
+
+def _local_fxyz_from_uipc_deformation(
+    rest_front: np.ndarray,
+    current_front: np.ndarray,
+    *,
+    membrane_area_m2: float,
+    center_velocity_y_m_s: float,
+    center_velocity_z_m_s: float,
+    max_rub_speed_m_s: float,
+    center_y_m: float,
+    center_z_m: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    indent = np.clip(rest_front[:, 0] - current_front[:, 0], 0.0, None).astype(np.float32)
+    mask = indent > float(args_cli.pressure_threshold_mm) * 1.0e-3
+    node_area = float(membrane_area_m2) / float(max(int(indent.size), 1))
+    local_fz = float(args_cli.normal_gain_n_per_m3) * indent * node_area
+
+    speed_scale = max(float(max_rub_speed_m_s), 1.0e-9)
+    vy_ratio = float(np.clip(center_velocity_y_m_s / speed_scale, -1.0, 1.0))
+    vz_ratio = float(np.clip(center_velocity_z_m_s / speed_scale, -1.0, 1.0))
+    local_fx = float(args_cli.shear_fraction) * local_fz * vy_ratio
+    local_fy = float(args_cli.shear_fraction) * local_fz * vz_ratio
+
+    local_y = rest_front[:, 1] - float(center_y_m)
+    local_z = rest_front[:, 2] - float(center_z_m)
+    if args_cli.tool_shape == "threaded_cylinder":
+        texture_height_m = float(args_cli.screw_thread_height_mm) * 1.0e-3
+    else:
+        texture_height_m = float(args_cli.object_texture_height_mm) * 1.0e-3
+    step = max(float(args_cli.object_texture_pitch_mm) * 1.0e-3 * 0.02, 2.0e-5)
+    grad_y = (_tool_height_texture(local_y + step, local_z) - _tool_height_texture(local_y - step, local_z)) / (2.0 * step)
+    grad_z = (_tool_height_texture(local_y, local_z + step) - _tool_height_texture(local_y, local_z - step)) / (2.0 * step)
+    local_fx += float(args_cli.texture_gradient_shear_fraction) * local_fz * texture_height_m * grad_y
+    local_fy += float(args_cli.texture_gradient_shear_fraction) * local_fz * texture_height_m * grad_z
+
+    local_fx *= mask
+    local_fy *= mask
+    local_fz *= mask
+    return np.stack([local_fx, local_fy, local_fz], axis=-1).astype(np.float32), mask.astype(bool), indent
+
+
+def _object_height_and_contact_mask_for_points(
+    points: np.ndarray,
+    *,
+    center_y_m: float,
+    center_z_m: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    local_y = points[:, 1] - float(center_y_m)
+    local_z = points[:, 2] - float(center_z_m)
+    height = _tool_height_texture(local_y, local_z).astype(np.float32)
+    contact_mask = _tool_contact_mask(local_y, local_z).astype(np.float32)
+    return height, contact_mask
+
+
+def _scalar_preview(values: np.ndarray, *, colormap: int = cv2.COLORMAP_TURBO) -> np.ndarray:
+    array = np.asarray(values, dtype=np.float32)
+    finite = np.isfinite(array)
+    if not np.any(finite):
+        return np.zeros((*array.shape, 3), dtype=np.uint8)
+    lo = float(np.min(array[finite]))
+    hi = float(np.max(array[finite]))
+    normalized = np.zeros_like(array, dtype=np.float32)
+    normalized[finite] = np.clip((array[finite] - lo) / max(hi - lo, EPS), 0.0, 1.0)
+    scalar = (normalized * 255.0).astype(np.uint8)
+    return cv2.cvtColor(cv2.applyColorMap(scalar, colormap), cv2.COLOR_BGR2RGB)
+
+
+def _pressure_fxyz_rgb(local_fxyz_grid: np.ndarray, pressure_mask_grid: np.ndarray, scales: dict[str, float]) -> np.ndarray:
+    fx = local_fxyz_grid[..., 0]
+    fy = local_fxyz_grid[..., 1]
+    fz = local_fxyz_grid[..., 2]
+    rgb = np.zeros((*fx.shape, 3), dtype=np.uint8)
+    rgb[..., 0] = (np.clip(np.abs(fx) / max(float(scales["fx"]), EPS), 0.0, 1.0) * 255.0).astype(np.uint8)
+    rgb[..., 1] = (np.clip(np.abs(fy) / max(float(scales["fy"]), EPS), 0.0, 1.0) * 255.0).astype(np.uint8)
+    rgb[..., 2] = (np.clip(fz / max(float(scales["fz"]), EPS), 0.0, 1.0) * 255.0).astype(np.uint8)
+    rgb[~pressure_mask_grid] = 0
+    return rgb
+
+
+def _pressure_component_gray(
+    values_grid: np.ndarray,
+    pressure_mask_grid: np.ndarray,
+    scale: float,
+    *,
+    use_abs: bool,
+) -> np.ndarray:
+    values = np.asarray(values_grid, dtype=np.float32)
+    if use_abs:
+        display = np.abs(values)
+    else:
+        display = np.clip(values, 0.0, None)
+    gray = (np.clip(display / max(float(scale), EPS), 0.0, 1.0) * 255.0).astype(np.uint8)
+    gray[~np.asarray(pressure_mask_grid).astype(bool)] = 0
+    return cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+
+
+def _object_texture_gray(
+    object_height_grid: np.ndarray,
+    object_contact_mask_grid: np.ndarray,
+    pressure_mask_grid: np.ndarray,
+) -> np.ndarray:
+    height = np.clip(np.asarray(object_height_grid, dtype=np.float32), 0.0, 1.0)
+    gray = (height * 255.0).astype(np.uint8)
+    if bool(args_cli.object_texture_gray_invert):
+        gray = 255 - gray
+
+    mode = str(args_cli.object_texture_display_mode)
+    if mode == "full":
+        mask = np.ones_like(gray, dtype=bool)
+    elif mode == "contact":
+        mask = np.asarray(object_contact_mask_grid) > 0.05
+    elif mode == "pressure":
+        mask = np.asarray(pressure_mask_grid).astype(bool)
+    else:
+        raise ValueError(f"Unsupported object texture display mode: {mode}")
+
+    gray[~mask] = 0
+    return cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+
+
+def _resize_preview(image_rgb: np.ndarray) -> np.ndarray:
+    scale = max(1, int(args_cli.preview_scale))
+    if scale == 1:
+        return image_rgb
+    height, width = image_rgb.shape[:2]
+    return cv2.resize(image_rgb, (width * scale, height * scale), interpolation=cv2.INTER_NEAREST)
+
+
+def _write_rgb(path: Path, image_rgb: np.ndarray) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ok = cv2.imwrite(str(path), cv2.cvtColor(np.ascontiguousarray(image_rgb), cv2.COLOR_RGB2BGR))
+    if not ok:
+        raise RuntimeError(f"Could not write image: {path}")
+
+
+def _open_video_writer(path: Path, frame_rgb: np.ndarray):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(
+        str(path),
+        fourcc,
+        max(float(args_cli.video_fps), 1.0),
+        (int(frame_rgb.shape[1]), int(frame_rgb.shape[0])),
+    )
+    if not writer.isOpened():
+        writer.release()
+        raise RuntimeError(f"Could not open video writer: {path}")
+    return writer
+
+
+def _require_finite_array(name: str, value: np.ndarray) -> None:
+    if not np.isfinite(value).all():
+        raise RuntimeError(f"{name} contains NaN or Inf.")
+
+
+def main() -> None:
+    _validate_args()
+    output_dir = Path(args_cli.output_dir).expanduser()
+    pressure_fx_dir = output_dir / "pressure_fx_gray_frames"
+    pressure_fy_dir = output_dir / "pressure_fy_gray_frames"
+    pressure_fz_dir = output_dir / "pressure_fz_gray_frames"
+    texture_dir = output_dir / "object_texture_gray_frames"
+    pressure_fx_dir.mkdir(parents=True, exist_ok=True)
+    pressure_fy_dir.mkdir(parents=True, exist_ok=True)
+    pressure_fz_dir.mkdir(parents=True, exist_ok=True)
+    texture_dir.mkdir(parents=True, exist_ok=True)
+    if bool(args_cli.save_pressure_fxyz_rgb_debug):
+        (output_dir / "pressure_fxyz_rgb_frames").mkdir(parents=True, exist_ok=True)
+
+    sim_dt = 1.0 / max(float(args_cli.sim_hz), EPS)
+
+    sim = sim_utils.SimulationContext(
+        SimulationCfg(
+            dt=sim_dt,
+            render_interval=1,
+            physx=PhysxCfg(enable_ccd=True),
+            physics_material=sim_utils.RigidBodyMaterialCfg(
+                friction_combine_mode="multiply",
+                restitution_combine_mode="multiply",
+                static_friction=1.0,
+                dynamic_friction=1.0,
+                restitution=0.0,
+            ),
+        )
+    )
+    sim.set_camera_view([0.075, -0.065, 0.045], [0.0, 0.0, 0.0])
+    stage = omni.usd.get_context().get_stage()
+    if stage is None:
+        raise RuntimeError("Could not get active USD stage.")
+
+    pad_contract: dict[str, object] | None = None
+    use_asset_contract = bool(args_cli.use_pad_usd_asset) and str(args_cli.membrane_source).startswith("asset")
+    if use_asset_contract:
+        pad_contract = _load_pad_asset_contract(stage, Path(args_cli.asset_usd))
+        if args_cli.membrane_source == "asset_sim_mesh":
+            raise NotImplementedError(
+                "asset_sim_mesh is reserved for a future high-quality UIPC sim mesh in UIPC_Pad.usda. "
+                "Use --membrane_source asset_runtime_volume for the current asset-driven bench."
+            )
+        width = float(pad_contract["width_m"])
+        length = float(pad_contract["length_m"])
+        thickness = float(pad_contract["thickness_m"])
+        visual_grid_points = np.asarray(pad_contract["visual_points"], dtype=np.float32)
+        visual_grid_source = "uipc_pad_usd_visual_target"
+    else:
+        UsdGeom.Xform.Define(stage, PAD_ASSET_ROOT)
+        width = float(args_cli.membrane_width_mm) * 1.0e-3
+        length = float(args_cli.membrane_length_mm) * 1.0e-3
+        thickness = float(args_cli.membrane_thickness_mm) * 1.0e-3
+        visual_grid_points = _make_visual_grid(width, length)
+        visual_grid_source = "procedural_grid"
+
+    UsdGeom.Xform.Define(stage, TOOL_ROOT)
+    light_cfg = sim_utils.DomeLightCfg(intensity=2200.0, color=(0.75, 0.75, 0.75))
+    light_cfg.func("/World/Light", light_cfg)
+    membrane_area_m2 = max(width * length, EPS)
+
+    membrane_points, membrane_triangles = _subdivided_box_surface(
+        x_min=-thickness,
+        x_max=0.0,
+        y_min=-width / 2.0,
+        y_max=width / 2.0,
+        z_min=-length / 2.0,
+        z_max=length / 2.0,
+        x_segments=max(1, int(args_cli.thickness_segments)),
+        y_segments=max(2, int(args_cli.front_segments_y)),
+        z_segments=max(2, int(args_cli.front_segments_z)),
+    )
+    _write_triangle_mesh(stage, MEMBRANE_MESH, membrane_points, membrane_triangles, color=(0.05, 0.35, 0.95), opacity=0.45)
+    (
+        tool_points,
+        tool_triangles,
+        tool_min_local_x,
+        tool_front_points,
+        tool_front_triangles,
+        tool_front_height_norm,
+    ) = _tool_mesh()
+    initial_tool_offset = _tool_offset_for_frame(0, tool_min_local_x)
+    _write_triangle_mesh(stage, TOOL_MESH, tool_points + initial_tool_offset, tool_triangles, color=(0.95, 0.35, 0.16), opacity=0.65)
+    texture_debug_lift = np.asarray(
+        (-max(float(args_cli.object_texture_debug_lift_mm), 0.0) * 1.0e-3, 0.0, 0.0),
+        dtype=np.float32,
+    )
+
+    anchor_thickness = 1.0e-3
+    anchor = RigidObject(
+        RigidObjectCfg(
+            prim_path=ANCHOR_PATH,
+            init_state=RigidObjectCfg.InitialStateCfg(pos=(-thickness - anchor_thickness / 2.0, 0.0, 0.0)),
+            spawn=sim_utils.CuboidCfg(
+                size=(anchor_thickness, width, length),
+                rigid_props=_rigid_props(dynamic=False),
+                collision_props=sim_utils.CollisionPropertiesCfg(contact_offset=0.0004, rest_offset=0.0),
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.05, 0.08, 0.12), opacity=0.0),
+            ),
+        )
+    )
+
+    uipc_sim = UipcSim(
+        UipcSimCfg(
+            dt=sim_dt,
+            gravity=(0.0, 0.0, 0.0),
+            ground_height=-1.0,
+            workspace=args_cli.workspace_dir,
+            contact=UipcSimCfg.Contact(
+                d_hat=float(args_cli.uipc_contact_d_hat_mm) * 1.0e-3,
+                default_friction_ratio=float(args_cli.friction_mu),
+                default_contact_resistance=float(args_cli.uipc_contact_resistance_gpa),
+            ),
+        )
+    )
+    membrane = UipcObject(
+        UipcObjectCfg(
+            prim_path=MEMBRANE_ROOT,
+            mesh_cfg=TetMeshCfg(
+                stop_quality=8,
+                max_its=200,
+                epsilon_r=float(args_cli.tet_epsilon_r),
+                edge_length_r=float(args_cli.tet_edge_length_r),
+                skip_simplify=True,
+                log_level=6,
+            ),
+            mass_density=float(args_cli.mass_density),
+            constitution_cfg=UipcObjectCfg.StableNeoHookeanCfg(
+                youngs_modulus=float(args_cli.youngs_modulus_mpa),
+                poisson_rate=float(args_cli.poisson_rate),
+            ),
+        ),
+        uipc_sim,
+    )
+    tool = UipcObject(
+        UipcObjectCfg(
+            prim_path=TOOL_ROOT,
+            mesh_cfg=TetMeshCfg(
+                stop_quality=8,
+                max_its=120,
+                epsilon_r=float(args_cli.tool_tet_epsilon_r),
+                edge_length_r=float(args_cli.tool_tet_edge_length_r),
+                log_level=6,
+            ),
+            mass_density=2000.0,
+            constitution_cfg=UipcObjectCfg.AffineBodyConstitutionCfg(
+                m_kappa=float(args_cli.tool_m_kappa_mpa),
+                kinematic=True,
+            ),
+        ),
+        uipc_sim,
+    )
+    _attachment = UipcIsaacAttachments(
+        UipcIsaacAttachmentsCfg(
+            constraint_strength_ratio=float(args_cli.attachment_strength_ratio),
+            body_name=None,
+            compute_attachment_data=True,
+            attachment_points_radius=float(args_cli.attachment_radius_mm) * 1.0e-3,
+            debug_vis=False,
+        ),
+        membrane,
+        anchor,
+    )
+
+    sim.reset()
+    anchor.update(0.0)
+    uipc_sim.setup_sim()
+    uipc_sim.update_render_meshes()
+    membrane.update(0.0)
+    tool.update(0.0)
+    if bool(args_cli.visualize_object_texture):
+        _write_colored_tool_texture_debug_mesh(
+            stage,
+            TEXTURE_DEBUG_FRONT_PATH,
+            tool_front_points + initial_tool_offset + texture_debug_lift,
+            tool_front_triangles,
+            tool_front_height_norm,
+        )
+
+    warmup_steps = max(0, int(args_cli.warmup_steps))
+    for warmup_step in range(warmup_steps):
+        if not simulation_app.is_running():
+            break
+        tool.write_vertex_positions_to_sim(_translated_tool_vertices(tool, initial_tool_offset, initial_tool_offset))
+        render = bool(args_cli.render_viewport) and warmup_step % max(1, int(args_cli.render_every)) == 0
+        sim.step(render=render)
+        uipc_sim.update_render_meshes()
+        anchor.update(sim_dt)
+        membrane.update(sim_dt)
+        tool.update(sim_dt)
+        if render and float(args_cli.render_sleep_sec) > 0.0:
+            time.sleep(float(args_cli.render_sleep_sec))
+
+    rest_surface_t = membrane.data.surf_nodal_pos_w.detach().clone()
+    if not torch.isfinite(rest_surface_t).all():
+        raise RuntimeError("rest_surface contains NaN or Inf.")
+    front_indices_t, back_indices_t = _front_back_indices(rest_surface_t)
+    rest_front = rest_surface_t[front_indices_t].detach().cpu().numpy().astype(np.float32)
+    visual_to_front, mapping_error = _nearest_indices(rest_front, visual_grid_points)
+    visual_mapper = _make_grid_mapper(visual_grid_points)
+    mapping_error_max = float(np.max(mapping_error)) if mapping_error.size else 0.0
+    mapping_error_warn_m = float(args_cli.mapping_error_warn_mm) * 1.0e-3
+    if mapping_error_max > mapping_error_warn_m:
+        print(
+            "[WARN] surface_to_visual nearest mapping max error is high: "
+            f"{mapping_error_max * 1000.0:.4f} mm > {float(args_cli.mapping_error_warn_mm):.4f} mm",
+            flush=True,
+        )
+
+    total_frames = _total_frames()
+    rub_distance_m = float(args_cli.rub_distance_mm) * 1.0e-3
+    max_rub_speed_m_s = rub_distance_m / max(float(max(int(args_cli.rub_frames) - 1, 1)) * sim_dt, sim_dt)
+    local_fxyz_frames: list[np.ndarray] = []
+    local_fxyz_grid_frames: list[np.ndarray] = []
+    pressure_mask_frames: list[np.ndarray] = []
+    pressure_mask_grid_frames: list[np.ndarray] = []
+    object_height_frames: list[np.ndarray] = []
+    object_height_grid_frames: list[np.ndarray] = []
+    object_contact_mask_frames: list[np.ndarray] = []
+    object_contact_mask_grid_frames: list[np.ndarray] = []
+    trajectory_frames: list[dict[str, object]] = []
+    prev_center_y = None
+    prev_center_z = None
+
+    for frame_id in range(total_frames):
+        if not simulation_app.is_running():
+            break
+        traj = _trajectory(frame_id)
+        center_y = float(traj["center_y_m"])
+        center_z = float(traj["center_z_m"])
+        velocity_y = 0.0 if prev_center_y is None else (center_y - prev_center_y) / sim_dt
+        velocity_z = 0.0 if prev_center_z is None else (center_z - prev_center_z) / sim_dt
+        prev_center_y = center_y
+        prev_center_z = center_z
+
+        offset = _tool_offset_for_frame(frame_id, tool_min_local_x)
+        tool.write_vertex_positions_to_sim(_translated_tool_vertices(tool, offset, initial_tool_offset))
+        if bool(args_cli.visualize_object_texture):
+            _set_mesh_points(stage, TEXTURE_DEBUG_FRONT_PATH, tool_front_points + offset + texture_debug_lift)
+        render = bool(args_cli.render_viewport) and frame_id % max(1, int(args_cli.render_every)) == 0
+        step_started = time.perf_counter()
+        sim.step(render=render)
+        elapsed = time.perf_counter() - step_started
+        if float(args_cli.physics_timing_warn_sec) > 0.0 and elapsed > float(args_cli.physics_timing_warn_sec):
+            print(f"[WARN] Slow UIPC step frame={frame_id:04d}, elapsed={elapsed:.3f}s", flush=True)
+        uipc_sim.update_render_meshes()
+        anchor.update(sim_dt)
+        membrane.update(sim_dt)
+        tool.update(sim_dt)
+        if render and float(args_cli.render_sleep_sec) > 0.0:
+            time.sleep(float(args_cli.render_sleep_sec))
+
+        current_surface_t = membrane.data.surf_nodal_pos_w.detach()
+        if not torch.isfinite(current_surface_t).all():
+            raise RuntimeError(f"current_surface contains NaN or Inf at frame {frame_id}.")
+        global_drift = torch.mean(
+            current_surface_t[back_indices_t] - rest_surface_t[back_indices_t],
+            dim=0,
+        )
+        current_front = (current_surface_t[front_indices_t] - global_drift).cpu().numpy().astype(np.float32)
+        local_fxyz, pressure_mask, indent = _local_fxyz_from_uipc_deformation(
+            rest_front,
+            current_front,
+            membrane_area_m2=membrane_area_m2,
+            center_velocity_y_m_s=velocity_y,
+            center_velocity_z_m_s=velocity_z,
+            max_rub_speed_m_s=max_rub_speed_m_s,
+            center_y_m=center_y,
+            center_z_m=center_z,
+        )
+        local_fxyz_grid = _vertex_values_to_grid(visual_mapper, local_fxyz[visual_to_front])
+        pressure_mask_grid = _vertex_values_to_grid(visual_mapper, pressure_mask[visual_to_front]).astype(bool)
+        object_height, object_contact_mask = _object_height_and_contact_mask_for_points(
+            rest_front,
+            center_y_m=center_y,
+            center_z_m=center_z,
+        )
+        object_height_grid = _vertex_values_to_grid(visual_mapper, object_height[visual_to_front])
+        object_contact_mask_grid = _vertex_values_to_grid(
+            visual_mapper,
+            object_contact_mask[visual_to_front],
+        )
+
+        _require_finite_array("local_fxyz", local_fxyz)
+        _require_finite_array("object_height", object_height)
+        _require_finite_array("object_contact_mask", object_contact_mask)
+        local_fxyz_frames.append(local_fxyz)
+        local_fxyz_grid_frames.append(local_fxyz_grid)
+        pressure_mask_frames.append(pressure_mask)
+        pressure_mask_grid_frames.append(pressure_mask_grid)
+        object_height_frames.append(object_height)
+        object_height_grid_frames.append(object_height_grid)
+        object_contact_mask_frames.append(object_contact_mask)
+        object_contact_mask_grid_frames.append(object_contact_mask_grid)
+        trajectory_frames.append(
+            {
+                **traj,
+                "frame": int(frame_id),
+                "center_velocity_y_m_s": float(velocity_y),
+                "center_velocity_z_m_s": float(velocity_z),
+                "global_fxyz_from_local": [float(v) for v in np.sum(local_fxyz, axis=0)],
+                "active_pressure_vertices": int(np.count_nonzero(pressure_mask)),
+                "max_indent_m": float(np.max(indent)),
+            }
+        )
+        if frame_id % max(1, int(args_cli.log_every)) == 0 or frame_id == total_frames - 1:
+            print(
+                "[INFO] v4_8 "
+                f"frame={frame_id:04d}/{total_frames - 1:04d} phase={traj['phase']} "
+                f"max_indent={float(np.max(indent)) * 1000.0:.4f}mm "
+                f"sum_fxyz=({float(np.sum(local_fxyz[:, 0])):+.6f}, "
+                f"{float(np.sum(local_fxyz[:, 1])):+.6f}, {float(np.sum(local_fxyz[:, 2])):+.6f})",
+                flush=True,
+            )
+
+    local_fxyz_array = np.stack(local_fxyz_frames, axis=0).astype(np.float32)
+    local_fxyz_grid_array = np.stack(local_fxyz_grid_frames, axis=0).astype(np.float32)
+    local_fx_array = local_fxyz_array[..., 0]
+    local_fy_array = local_fxyz_array[..., 1]
+    local_fz_array = local_fxyz_array[..., 2]
+    local_fx_grid_array = local_fxyz_grid_array[..., 0]
+    local_fy_grid_array = local_fxyz_grid_array[..., 1]
+    local_fz_grid_array = local_fxyz_grid_array[..., 2]
+    pressure_mask_array = np.stack(pressure_mask_frames, axis=0).astype(bool)
+    pressure_mask_grid_array = np.stack(pressure_mask_grid_frames, axis=0).astype(bool)
+    object_height_array = np.stack(object_height_frames, axis=0).astype(np.float32)
+    object_height_grid_array = np.stack(object_height_grid_frames, axis=0).astype(np.float32)
+    object_contact_mask_array = np.stack(object_contact_mask_frames, axis=0).astype(np.float32)
+    object_contact_mask_grid_array = np.stack(object_contact_mask_grid_frames, axis=0).astype(np.float32)
+    trajectory_array = np.asarray(
+        [
+            [
+                float(item["depth_m"]),
+                float(item["center_y_m"]),
+                float(item["center_z_m"]),
+                float(item["center_velocity_y_m_s"]),
+                float(item["center_velocity_z_m_s"]),
+            ]
+            for item in trajectory_frames
+        ],
+        dtype=np.float32,
+    )
+
+    fx_scale = float(args_cli.fixed_fx_max) if float(args_cli.fixed_fx_max) > EPS else float(np.max(np.abs(local_fx_grid_array)))
+    fy_scale = float(args_cli.fixed_fy_max) if float(args_cli.fixed_fy_max) > EPS else float(np.max(np.abs(local_fy_grid_array)))
+    fz_scale = float(args_cli.fixed_fz_max) if float(args_cli.fixed_fz_max) > EPS else float(np.max(local_fz_grid_array))
+    scales = {"fx": max(fx_scale, EPS), "fy": max(fy_scale, EPS), "fz": max(fz_scale, EPS)}
+
+    pressure_fx_video_path = output_dir / "pressure_fx_gray_sequence.mp4"
+    pressure_fy_video_path = output_dir / "pressure_fy_gray_sequence.mp4"
+    pressure_fz_video_path = output_dir / "pressure_fz_gray_sequence.mp4"
+    pressure_rgb_video_path = output_dir / "pressure_fxyz_rgb_sequence.mp4"
+    texture_video_path = output_dir / "object_texture_gray_sequence.mp4"
+    pressure_fx_writer = None
+    pressure_fy_writer = None
+    pressure_fz_writer = None
+    pressure_rgb_writer = None
+    texture_writer = None
+    peak_frame = int(np.argmax(np.sum(local_fxyz_array[..., 2], axis=1)))
+    try:
+        for frame_id in range(local_fxyz_array.shape[0]):
+            pressure_fx_gray = _resize_preview(
+                _pressure_component_gray(local_fx_grid_array[frame_id], pressure_mask_grid_array[frame_id], scales["fx"], use_abs=True)
+            )
+            pressure_fy_gray = _resize_preview(
+                _pressure_component_gray(local_fy_grid_array[frame_id], pressure_mask_grid_array[frame_id], scales["fy"], use_abs=True)
+            )
+            pressure_fz_gray = _resize_preview(
+                _pressure_component_gray(local_fz_grid_array[frame_id], pressure_mask_grid_array[frame_id], scales["fz"], use_abs=False)
+            )
+            texture_gray = _resize_preview(
+                _object_texture_gray(
+                    object_height_grid_array[frame_id],
+                    object_contact_mask_grid_array[frame_id],
+                    pressure_mask_grid_array[frame_id],
+                )
+            )
+            _write_rgb(output_dir / "pressure_fx_gray_frames" / f"{frame_id:04d}.png", pressure_fx_gray)
+            _write_rgb(output_dir / "pressure_fy_gray_frames" / f"{frame_id:04d}.png", pressure_fy_gray)
+            _write_rgb(output_dir / "pressure_fz_gray_frames" / f"{frame_id:04d}.png", pressure_fz_gray)
+            _write_rgb(output_dir / "object_texture_gray_frames" / f"{frame_id:04d}.png", texture_gray)
+            if frame_id == peak_frame:
+                _write_rgb(output_dir / "preview_pressure_fx_gray.png", pressure_fx_gray)
+                _write_rgb(output_dir / "preview_pressure_fy_gray.png", pressure_fy_gray)
+                _write_rgb(output_dir / "preview_pressure_fz_gray.png", pressure_fz_gray)
+                _write_rgb(output_dir / "preview_object_texture_gray.png", texture_gray)
+            if pressure_fx_writer is None:
+                pressure_fx_writer = _open_video_writer(pressure_fx_video_path, pressure_fx_gray)
+            if pressure_fy_writer is None:
+                pressure_fy_writer = _open_video_writer(pressure_fy_video_path, pressure_fy_gray)
+            if pressure_fz_writer is None:
+                pressure_fz_writer = _open_video_writer(pressure_fz_video_path, pressure_fz_gray)
+            if texture_writer is None:
+                texture_writer = _open_video_writer(texture_video_path, texture_gray)
+            pressure_fx_writer.write(cv2.cvtColor(pressure_fx_gray, cv2.COLOR_RGB2BGR))
+            pressure_fy_writer.write(cv2.cvtColor(pressure_fy_gray, cv2.COLOR_RGB2BGR))
+            pressure_fz_writer.write(cv2.cvtColor(pressure_fz_gray, cv2.COLOR_RGB2BGR))
+            texture_writer.write(cv2.cvtColor(texture_gray, cv2.COLOR_RGB2BGR))
+            if bool(args_cli.save_pressure_fxyz_rgb_debug):
+                pressure_rgb = _resize_preview(
+                    _pressure_fxyz_rgb(local_fxyz_grid_array[frame_id], pressure_mask_grid_array[frame_id], scales)
+                )
+                _write_rgb(output_dir / "pressure_fxyz_rgb_frames" / f"{frame_id:04d}.png", pressure_rgb)
+                if frame_id == peak_frame:
+                    _write_rgb(output_dir / "preview_pressure_fxyz_rgb.png", pressure_rgb)
+                if pressure_rgb_writer is None:
+                    pressure_rgb_writer = _open_video_writer(pressure_rgb_video_path, pressure_rgb)
+                pressure_rgb_writer.write(cv2.cvtColor(pressure_rgb, cv2.COLOR_RGB2BGR))
+    finally:
+        if pressure_fx_writer is not None:
+            pressure_fx_writer.release()
+        if pressure_fy_writer is not None:
+            pressure_fy_writer.release()
+        if pressure_fz_writer is not None:
+            pressure_fz_writer.release()
+        if pressure_rgb_writer is not None:
+            pressure_rgb_writer.release()
+        if texture_writer is not None:
+            texture_writer.release()
+
+    np.save(output_dir / "local_fxyz.npy", local_fxyz_array)
+    np.save(output_dir / "local_fxyz_grid.npy", local_fxyz_grid_array)
+    np.save(output_dir / "local_fx.npy", local_fx_array)
+    np.save(output_dir / "local_fy.npy", local_fy_array)
+    np.save(output_dir / "local_fz.npy", local_fz_array)
+    np.save(output_dir / "local_fx_grid.npy", local_fx_grid_array)
+    np.save(output_dir / "local_fy_grid.npy", local_fy_grid_array)
+    np.save(output_dir / "local_fz_grid.npy", local_fz_grid_array)
+    np.save(output_dir / "pressure_mask.npy", pressure_mask_array)
+    np.save(output_dir / "pressure_mask_grid.npy", pressure_mask_grid_array)
+    np.save(output_dir / "object_height.npy", object_height_array)
+    np.save(output_dir / "object_height_grid.npy", object_height_grid_array)
+    np.save(output_dir / "object_contact_mask.npy", object_contact_mask_array)
+    np.save(output_dir / "object_contact_mask_grid.npy", object_contact_mask_grid_array)
+    np.save(output_dir / "trajectory.npy", trajectory_array)
+    np.save(output_dir / "surface_to_visual_map.npy", visual_to_front)
+    np.save(output_dir / "mapping_error.npy", mapping_error)
+
+    release_tail = max(1, min(int(args_cli.release_frames), local_fxyz_array.shape[0]))
+    release_peak = float(np.max(np.abs(local_fxyz_array[-release_tail:])))
+    global_fxyz = np.sum(local_fxyz_array, axis=1)
+    sanity_checks = {
+        "local_fxyz_has_pressure": bool(np.max(local_fxyz_array[..., 2]) > 0.0),
+        "pressure_mask_has_contact": bool(np.any(pressure_mask_array)),
+        "release_returns_near_zero": bool(release_peak <= max(1.0e-5, 0.08 * float(np.max(np.abs(local_fxyz_array))))),
+        "mapping_error_reasonable": bool(mapping_error_max <= mapping_error_warn_m),
+        "all_finite": bool(
+            np.isfinite(local_fxyz_array).all()
+            and np.isfinite(local_fxyz_grid_array).all()
+            and np.isfinite(object_height_array).all()
+            and np.isfinite(object_height_grid_array).all()
+            and np.isfinite(object_contact_mask_array).all()
+            and np.isfinite(object_contact_mask_grid_array).all()
+        ),
+    }
+    pad_contract_metadata = None
+    if pad_contract is not None:
+        pad_contract_metadata = {
+            key: value
+            for key, value in pad_contract.items()
+            if key != "visual_points"
+        }
+    metadata = {
+        "script_version": "v4_8_pad_asset_visual_contact",
+        "main_outputs": [
+            "pressure_fx_gray_sequence.mp4",
+            "pressure_fy_gray_sequence.mp4",
+            "pressure_fz_gray_sequence.mp4",
+            "object_texture_gray_sequence.mp4",
+            "local_fxyz.npy",
+            "local_fx.npy",
+            "local_fy.npy",
+            "local_fz.npy",
+        ],
+        "membrane_source": str(args_cli.membrane_source),
+        "use_pad_usd_asset": bool(args_cli.use_pad_usd_asset),
+        "asset_contract_loaded": pad_contract_metadata is not None,
+        "asset_usd": pad_contract_metadata["asset_usd"] if pad_contract_metadata is not None else None,
+        "pad_asset_contract": pad_contract_metadata,
+        "visual_grid_source": visual_grid_source,
+        "force_source": "uipc_deformation_proxy",
+        "deformation_source": "uipc_membrane_surface",
+        "native_uipc_contact_force_used": False,
+        "calibrated_to_real_sensor": False,
+        "force_unit": "simulation_newton_per_vertex_contribution_from_uipc_deformation_proxy",
+        "local_fxyz_shape": list(local_fxyz_array.shape),
+        "local_fxyz_grid_shape": list(local_fxyz_grid_array.shape),
+        "local_fx_shape": list(local_fx_array.shape),
+        "local_fy_shape": list(local_fy_array.shape),
+        "local_fz_shape": list(local_fz_array.shape),
+        "local_fx_grid_shape": list(local_fx_grid_array.shape),
+        "local_fy_grid_shape": list(local_fy_grid_array.shape),
+        "local_fz_grid_shape": list(local_fz_grid_array.shape),
+        "local_fxyz_channel_order": [
+            "Fx_shear_local_y",
+            "Fy_shear_local_z",
+            "Fz_normal_local_x_positive_compression",
+        ],
+        "pressure_component_display": {
+            "pressure_fx_gray": "abs(Fx_shear_local_y), masked by pressure_mask",
+            "pressure_fy_gray": "abs(Fy_shear_local_z), masked by pressure_mask",
+            "pressure_fz_gray": "positive Fz_normal_local_x compression, masked by pressure_mask",
+            "background": "black",
+            "white": "larger displayed force magnitude",
+            "signed_values_preserved_in": ["local_fx.npy", "local_fy.npy", "local_fz.npy"],
+        },
+        "pressure_fxyz_rgb_debug_saved": bool(args_cli.save_pressure_fxyz_rgb_debug),
+        "surface_mapping": "nearest",
+        "surface_to_visual_map_shape": list(visual_to_front.shape),
+        "mapping_error_max_m": mapping_error_max,
+        "mapping_error_mean_m": float(np.mean(mapping_error)) if mapping_error.size else 0.0,
+        "mapping_error_warn_m": mapping_error_warn_m,
+        "front_vertex_count": int(rest_front.shape[0]),
+        "visual_grid_shape": list(local_fxyz_grid_array.shape[1:3]),
+        "object_texture_kind": "geometry_displacement_mesh",
+        "object_texture_type": str(args_cli.object_texture_type),
+        "object_texture_height_m": float(args_cli.object_texture_height_mm) * 1.0e-3,
+        "object_texture_pitch_m": float(args_cli.object_texture_pitch_mm) * 1.0e-3,
+        "object_texture_image_mode": "gray_height_map",
+        "object_texture_display_mode": str(args_cli.object_texture_display_mode),
+        "object_texture_gray_invert": bool(args_cli.object_texture_gray_invert),
+        "object_texture_gray_meaning": {
+            "black": "low height or masked out",
+            "white": "high/protruding geometry",
+            "mask_full": "no mask",
+            "mask_contact": "object_contact_mask",
+            "mask_pressure": "pressure_mask_debug_only",
+        },
+        "tool_shape": str(args_cli.tool_shape),
+        "screw_axis": str(args_cli.screw_axis) if args_cli.tool_shape == "threaded_cylinder" else None,
+        "screw_radius_m": float(args_cli.screw_radius_mm) * 1.0e-3 if args_cli.tool_shape == "threaded_cylinder" else None,
+        "screw_length_m": float(args_cli.screw_length_mm) * 1.0e-3 if args_cli.tool_shape == "threaded_cylinder" else None,
+        "screw_thread_pitch_m": float(args_cli.screw_thread_pitch_mm) * 1.0e-3 if args_cli.tool_shape == "threaded_cylinder" else None,
+        "screw_thread_height_m": float(args_cli.screw_thread_height_mm) * 1.0e-3 if args_cli.tool_shape == "threaded_cylinder" else None,
+        "object_texture_debug_overlay": bool(args_cli.visualize_object_texture),
+        "object_texture_debug_lift_m": max(float(args_cli.object_texture_debug_lift_mm), 0.0) * 1.0e-3,
+        "object_texture_debug_path": TEXTURE_DEBUG_FRONT_PATH if bool(args_cli.visualize_object_texture) else None,
+        "pressure_mask_source": f"indent_from_uipc_surface > {float(args_cli.pressure_threshold_mm) * 1.0e-3:g} m",
+        "pressure_background": "black",
+        "parameters": {
+            "membrane_source": str(args_cli.membrane_source),
+            "visual_grid_source": visual_grid_source,
+            "membrane_width_m": width,
+            "membrane_length_m": length,
+            "membrane_thickness_m": thickness,
+            "sim_hz": float(args_cli.sim_hz),
+            "indent_depth_m": float(args_cli.indent_depth_mm) * 1.0e-3,
+            "initial_gap_m": float(args_cli.initial_gap_mm) * 1.0e-3,
+            "rub_axis": str(args_cli.rub_axis),
+            "rub_distance_m": float(args_cli.rub_distance_mm) * 1.0e-3,
+            "contact_shape": str(args_cli.contact_shape),
+            "contact_width_m": float(args_cli.contact_width_mm) * 1.0e-3,
+            "contact_length_m": float(args_cli.contact_length_mm) * 1.0e-3,
+            "object_texture_display_mode": str(args_cli.object_texture_display_mode),
+            "object_texture_gray_invert": bool(args_cli.object_texture_gray_invert),
+            "tool_shape": str(args_cli.tool_shape),
+            "tool_surface_segments_y": int(args_cli.tool_surface_segments_y),
+            "tool_surface_segments_z": int(args_cli.tool_surface_segments_z),
+            "screw_axis": str(args_cli.screw_axis),
+            "screw_radius_m": float(args_cli.screw_radius_mm) * 1.0e-3,
+            "screw_length_m": float(args_cli.screw_length_mm) * 1.0e-3,
+            "screw_thread_pitch_m": float(args_cli.screw_thread_pitch_mm) * 1.0e-3,
+            "screw_thread_height_m": float(args_cli.screw_thread_height_mm) * 1.0e-3,
+            "screw_radial_segments": int(args_cli.screw_radial_segments),
+            "screw_length_segments": int(args_cli.screw_length_segments),
+            "normal_gain_n_per_m3": float(args_cli.normal_gain_n_per_m3),
+            "shear_fraction": float(args_cli.shear_fraction),
+            "texture_gradient_shear_fraction": float(args_cli.texture_gradient_shear_fraction),
+            "pressure_gray_scales": scales,
+            "save_pressure_fxyz_rgb_debug": bool(args_cli.save_pressure_fxyz_rgb_debug),
+        },
+        "force_ranges": {
+            "fx_min_max": [float(np.min(local_fxyz_array[..., 0])), float(np.max(local_fxyz_array[..., 0]))],
+            "fy_min_max": [float(np.min(local_fxyz_array[..., 1])), float(np.max(local_fxyz_array[..., 1]))],
+            "fz_min_max": [float(np.min(local_fxyz_array[..., 2])), float(np.max(local_fxyz_array[..., 2]))],
+            "global_fxyz_from_local_min_max": [
+                [float(v) for v in np.min(global_fxyz, axis=0)],
+                [float(v) for v in np.max(global_fxyz, axis=0)],
+            ],
+            "release_tail_abs_peak": release_peak,
+        },
+        "output_files": {
+            "pressure_fx_gray_frames": str(output_dir / "pressure_fx_gray_frames"),
+            "pressure_fy_gray_frames": str(output_dir / "pressure_fy_gray_frames"),
+            "pressure_fz_gray_frames": str(output_dir / "pressure_fz_gray_frames"),
+            "pressure_fx_gray_sequence": str(pressure_fx_video_path),
+            "pressure_fy_gray_sequence": str(pressure_fy_video_path),
+            "pressure_fz_gray_sequence": str(pressure_fz_video_path),
+            "preview_pressure_fx_gray": str(output_dir / "preview_pressure_fx_gray.png"),
+            "preview_pressure_fy_gray": str(output_dir / "preview_pressure_fy_gray.png"),
+            "preview_pressure_fz_gray": str(output_dir / "preview_pressure_fz_gray.png"),
+            "pressure_fxyz_rgb_frames": str(output_dir / "pressure_fxyz_rgb_frames")
+            if bool(args_cli.save_pressure_fxyz_rgb_debug)
+            else None,
+            "pressure_fxyz_rgb_sequence": str(pressure_rgb_video_path)
+            if bool(args_cli.save_pressure_fxyz_rgb_debug)
+            else None,
+            "preview_pressure_fxyz_rgb": str(output_dir / "preview_pressure_fxyz_rgb.png")
+            if bool(args_cli.save_pressure_fxyz_rgb_debug)
+            else None,
+            "object_texture_gray_frames": str(output_dir / "object_texture_gray_frames"),
+            "object_texture_gray_sequence": str(texture_video_path),
+            "preview_object_texture_gray": str(output_dir / "preview_object_texture_gray.png"),
+            "local_fxyz": str(output_dir / "local_fxyz.npy"),
+            "local_fxyz_grid": str(output_dir / "local_fxyz_grid.npy"),
+            "local_fx": str(output_dir / "local_fx.npy"),
+            "local_fy": str(output_dir / "local_fy.npy"),
+            "local_fz": str(output_dir / "local_fz.npy"),
+            "local_fx_grid": str(output_dir / "local_fx_grid.npy"),
+            "local_fy_grid": str(output_dir / "local_fy_grid.npy"),
+            "local_fz_grid": str(output_dir / "local_fz_grid.npy"),
+            "pressure_mask": str(output_dir / "pressure_mask.npy"),
+            "pressure_mask_grid": str(output_dir / "pressure_mask_grid.npy"),
+            "object_height": str(output_dir / "object_height.npy"),
+            "object_height_grid": str(output_dir / "object_height_grid.npy"),
+            "object_contact_mask": str(output_dir / "object_contact_mask.npy"),
+            "object_contact_mask_grid": str(output_dir / "object_contact_mask_grid.npy"),
+            "trajectory": str(output_dir / "trajectory.npy"),
+            "surface_to_visual_map": str(output_dir / "surface_to_visual_map.npy"),
+            "mapping_error": str(output_dir / "mapping_error.npy"),
+            "object_texture_debug_path": TEXTURE_DEBUG_FRONT_PATH if bool(args_cli.visualize_object_texture) else None,
+            "metadata": str(output_dir / "metadata.json"),
+        },
+        "frames": trajectory_frames,
+        "sanity_checks": sanity_checks,
+        "strict_sanity": bool(args_cli.strict_sanity),
+    }
+    metadata["passed"] = all(bool(v) for v in sanity_checks.values())
+    metadata_path = output_dir / "metadata.json"
+    metadata_path.write_text(json.dumps(metadata, indent=2, allow_nan=False), encoding="utf-8")
+    print(
+        json.dumps(
+            {
+                "script_version": metadata["script_version"],
+                "passed": metadata["passed"],
+                "force_source": metadata["force_source"],
+                "local_fxyz_shape": metadata["local_fxyz_shape"],
+                "local_fxyz_grid_shape": metadata["local_fxyz_grid_shape"],
+                "mapping_error_max_m": metadata["mapping_error_max_m"],
+                "force_ranges": metadata["force_ranges"],
+                "output_files": metadata["output_files"],
+            },
+            indent=2,
+        ),
+        flush=True,
+    )
+    if not metadata["passed"]:
+        print(f"[WARN] V4.8 sanity checks failed; outputs were still saved. See: {metadata_path}", flush=True)
+        if bool(args_cli.strict_sanity):
+            raise RuntimeError(f"V4.8 UIPC pad asset visual-contact failed sanity checks. See: {metadata_path}")
+
+
+if __name__ == "__main__":
+    exit_code = 0
+    try:
+        main()
+    except Exception:
+        exit_code = 1
+        traceback.print_exc()
+    finally:
+        simulation_app.close()
+    sys.exit(exit_code)

@@ -1,0 +1,104 @@
+#usda 1.0
+(
+    defaultPrim = "piper"
+    metersPerUnit = 1
+    upAxis = "Z"
+    subLayers = [
+        @piper.usd@
+    ]
+)
+
+over "piper"
+{
+    def Xform "openworldtactile_case_left" (
+        prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+    )
+    {
+        bool physics:kinematicEnabled = 0
+        float physics:mass = 0.001
+        bool physics:rigidBodyEnabled = 1
+        bool physics:startsAsleep = 0
+        double3 xformOp:translate = (0.17847561104630905, -0.024001233970799687, 0.223888309798371)
+        quatd xformOp:orient = (0.47773324782513005, -0.5213231913915624, -0.5213145487192676, 0.47772818143102636)
+        double3 xformOp:scale = (1, 1, 1)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+        def Camera "Camera"
+        {
+            float focalLength = 24
+            float focusDistance = 0.03
+            float horizontalAperture = 20.955
+            float2 clippingRange = (0.024, 0.034)
+            double3 xformOp:translate = (0, 0, 0)
+            quatd xformOp:orient = (0.7071068, 0, -0.7071068, 0)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient"]
+        }
+
+        def Cube "openworldtactile_pad_visual"
+        {
+            token visibility = "invisible"
+            double size = 1
+            color3f[] primvars:displayColor = [(0.02, 0.02, 0.02)]
+            double3 xformOp:translate = (0.02625, 0, 0)
+            double3 xformOp:scale = (0.0045, 0.02075, 0.02525)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+
+        def Xform "gelpad_uipc" (
+            customData = {
+                string mountAlignment = "back_surface_bottom_aligned_to_reference_gelpad_back_x"
+                string semantics = "v2_7_style_uipc_physical_membrane"
+            }
+        )
+        {
+            def Mesh "mesh"
+            {
+                uniform token subdivisionScheme = "none"
+                bool doubleSided = 1
+                color3f[] primvars:displayColor = [(0.05, 0.35, 0.95)]
+                float[] primvars:displayOpacity = [0.45]
+                point3f[] points = [
+                    (0.024, -0.010375, -0.012625),
+                    (0.024, 0.010375, -0.012625),
+                    (0.024, -0.010375, 0.012625),
+                    (0.024, 0.010375, 0.012625),
+                    (0.0245, -0.010375, -0.012625),
+                    (0.0245, 0.010375, -0.012625),
+                    (0.0245, -0.010375, 0.012625),
+                    (0.0245, 0.010375, 0.012625),
+                ]
+                int[] faceVertexCounts = [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]
+                int[] faceVertexIndices = [
+                    0, 2, 1,
+                    1, 2, 3,
+                    4, 5, 6,
+                    5, 7, 6,
+                    0, 1, 4,
+                    1, 5, 4,
+                    2, 6, 3,
+                    3, 6, 7,
+                    0, 4, 2,
+                    2, 4, 6,
+                    1, 3, 5,
+                    3, 7, 5,
+                ]
+            }
+        }
+    }
+
+    over "link7"
+    {
+        def PhysicsFixedJoint "openworldtactile_case_left_joint"
+        {
+            rel physics:body0 = </piper/link7>
+            rel physics:body1 = </piper/openworldtactile_case_left>
+            bool physics:collisionEnabled = 0
+            bool physics:excludeFromArticulation = 0
+            bool physics:jointEnabled = 1
+            point3f physics:localPos0 = (0, -0.013, 0.024)
+            quatf physics:localRot0 = (0.5, 0.5, 0.5, -0.5)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+    }
+}

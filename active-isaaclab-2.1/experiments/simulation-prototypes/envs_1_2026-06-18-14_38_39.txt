@@ -1,0 +1,64 @@
+Sensor Config: 
+{
+  "class_type": "openworldtactile.gelsight_sensor:GelSightSensor",
+  "prim_path": "/World/envs/env_.*/Robot/gelsight_mini_case",
+  "update_period": 0.01,
+  "history_length": 0,
+  "debug_vis": true,
+  "case_dimensions": {
+    "width": 0.032,
+    "length": 0.028,
+    "height": 0.024
+  },
+  "gelpad_dimensions": {
+    "width": 0.02075,
+    "length": 0.02525,
+    "height": 0.0045
+  },
+  "sensor_camera_cfg": {
+    "prim_path_appendix": "/Camera",
+    "update_period": 0,
+    "resolution": [
+      320,
+      240
+    ],
+    "data_types": [
+      "depth"
+    ],
+    "clipping_range": [
+      0.024,
+      0.029
+    ]
+  },
+  "data_types": [
+    "tactile_rgb",
+    "tactile_force_field"
+  ],
+  "optical_sim_cfg": {
+    "simulation_approach_class": "openworldtactile.simulation_approaches.gpu_taxim.taxim_sim:TaximSimulator",
+    "device": "cuda",
+    "calib_folder_path": "packages/assets/openworldtactile_assets/data/Sensors/GelSight_Mini/calibs/640x480",
+    "with_shadow": false,
+    "tactile_img_res": [
+      320,
+      240
+    ],
+    "gelpad_height": 0.0045,
+    "gelpad_to_camera_min_distance": 0.024
+  },
+  "marker_motion_sim_cfg": null,
+  "compute_indentation_depth_class": "optical_sim",
+  "device": "cuda"
+}
+GPU Info: 
+Name: NVIDIA GeForce RTX 5090 D v2 
+Driver: 590.48.01 
+
+Performance data: 
+num_envs: 1 
+Total amount of 'in-contact' frames per env (ran pattern 10 times): 5880
+Total sim time: 289.7200ms 
+Avg physics_sim time for one frame per env:     35.2927ms 
+Avg tactile_sim time for one frame per env:      6.1349ms 
+
+| CPU:16.4% | RAM:55.1% | GPU Compute:54% | GPU Memory: 31.80% |

@@ -1,0 +1,20 @@
+IsaacSim-Tactile4OpenWorld
+OpenWorldTactile framework
+Copyright (c) 2022-2026, The OpenWorldTactile Project Developers.
+
+The root BSD-3-Clause license applies to original OpenWorldTactile contributions
+unless a file or subtree states another license. This distribution also
+contains third-party and upstream material under BSD-3-Clause, MIT,
+Apache-2.0, GPL-3.0-only, AGPL-3.0-or-later, and BSL-1.0.
+
+Major upstream projects include Isaac Lab/ORBIT, libuipc, MuDA, TetGen,
+Octree, Catch2, AgileX Piper ROS, MoveIt, Taxim, FOTS, GelSight robotics,
+Franka ROS, and ManiSkill-ViTac2025. Their copyright, attribution, and
+license notices remain in the relevant files and subtrees.
+
+See THIRD_PARTY_NOTICES.md for component boundaries, source locations,
+license locations, modification notes, and research citations.
+
+Product and project names may be trademarks of their respective owners.
+Their inclusion identifies compatibility or provenance and does not imply
+endorsement.

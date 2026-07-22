@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments and editors
+.venv/
+venv/
+.idea/
+.vscode/
+*.swp
+
+# Builds and native artifacts
+build/
+dist/
+*.dll
+*.dylib
+*.exe
+*.lib
+*.o
+*.obj
+*.pdb
+*.pyd
+*.so
+
+# Research outputs and opaque checkpoints
+logs/
+outputs/
+runs/
+wandb/
+*.ckpt
+*.pt
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# OS metadata
+.DS_Store
+Thumbs.db

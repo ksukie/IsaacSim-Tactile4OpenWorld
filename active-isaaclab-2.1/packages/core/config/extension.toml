@@ -1,0 +1,30 @@
+[package]
+
+# Semantic Versioning is used: https://semver.org/
+version = "0.1.0"
+
+# Description
+category = "isaaclab"
+readme  = "README.md"
+
+title = "OpenWorldTactile Core"
+author = "The OpenWorldTactile Project Developers"
+maintainer = "The OpenWorldTactile Project Developers"
+description = "Core tactile and visuotactile simulation components for Isaac Lab."
+repository = ""
+keywords = ["robotics", "simulation", "isaaclab", "tactile"]
+
+[dependencies]
+"isaaclab" = {}
+
+[[python.module]]
+name = "openworldtactile"
+
+[isaaclab_settings]
+# TODO: Uncomment and list any apt dependencies here.
+#       If none, leave it commented out.
+# apt_deps = ["example_package"]
+# TODO: Uncomment and provide path to a ros_ws
+#       with rosdeps to be installed. If none,
+#       leave it commented out.
+# ros_ws = "path/from/extension_root/to/ros_ws"

@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/media/openworldtactile-logo-lockup-v6.png" alt="OpenWorldTactile logo">
+  <img src="docs/media/openworldtactile-logo-lockup-v6.webp" alt="OpenWorldTactile logo">
 </p>
 
 <h1 align="center">IsaacSim-Tactile4OpenWorld</h1>
@@ -35,7 +35,7 @@ OpenWorldTactile brings tactile sensing and contact research into a shared Isaac
 “Open world” means that experiments can be extended across robots, sensors, objects, and contact conditions. It does not mean the project provides a general-purpose world model or zero-shot control in arbitrary scenes.
 
 <p align="center">
-  <img src="docs/media/openworldtactile-hero.png" alt="OpenWorldTactile contact and tactile-signal pipeline">
+  <img src="docs/media/openworldtactile-hero.webp" alt="OpenWorldTactile contact and tactile-signal pipeline">
 </p>
 
 ## Choose a starting point
@@ -92,7 +92,13 @@ docs/                    Mirrored English and Simplified Chinese user guides
 tools/repository/        Maintainer-only static audit and inventory tools
 ```
 
+## Research lineage
+
 The OpenWorldTactile experiment labels (`V1` through `V6.2`) are research milestones, not Isaac Lab versions. See the [experiment lineage](docs/en/reference/experiment-lineage.md) before choosing a historical script.
+
+<p align="center">
+  <img src="docs/media/openworldtactile-lineage-en.webp" alt="OpenWorldTactile V1 through V6 research lineage and core signal pipeline">
+</p>
 
 ## Project status and support
 

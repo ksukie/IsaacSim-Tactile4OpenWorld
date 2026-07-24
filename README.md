@@ -19,6 +19,16 @@
   <a href="CITATIONS.md">Cite</a>
 </p>
 
+<p align="center">
+  <a href="docs/en/reference/compatibility.md"><img src="https://img.shields.io/badge/Isaac%20Lab-2.1.1%20mainline-6AA84F" alt="Isaac Lab 2.1.1 mainline"></a>
+  <a href="docs/en/reference/compatibility.md"><img src="https://img.shields.io/badge/Isaac%20Sim-4.5%20reference-8ABA0F" alt="Isaac Sim 4.5 reference"></a>
+  <a href="docs/en/reference/compatibility.md"><img src="https://img.shields.io/badge/Ubuntu-24.04-E95420?logo=ubuntu&amp;logoColor=white" alt="Ubuntu 24.04 reference environment"></a>
+  <br>
+  <a href="docs/en/reference/compatibility.md"><img src="https://img.shields.io/badge/Python-3.10%20reference-3776AB" alt="Python 3.10 reference"></a>
+  <a href="#project-status-and-support"><img src="https://img.shields.io/badge/status-active-2EA44F" alt="Project status: active"></a>
+  <a href="THIRD_PARTY_NOTICES.md"><img src="https://img.shields.io/badge/license-multi--license-7952B3" alt="License: multi-license"></a>
+</p>
+
 > [!IMPORTANT]
 > This is a research codebase, not a standalone Isaac Lab distribution. The current route requires an external Isaac Lab 2.1.1 / Isaac Sim 4.5 environment. UIPC experiments also compile the bundled libuipc source. See [compatibility and validation status](docs/en/reference/compatibility.md) before installing.
 

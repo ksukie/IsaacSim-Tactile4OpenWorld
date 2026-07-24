@@ -19,6 +19,16 @@
   <a href="CITATIONS.zh-CN.md">引用</a>
 </p>
 
+<p align="center">
+  <a href="docs/zh-CN/reference/compatibility.md"><img src="https://img.shields.io/badge/Isaac%20Lab-2.1.1%20mainline-6AA84F" alt="Isaac Lab 2.1.1 主线"></a>
+  <a href="docs/zh-CN/reference/compatibility.md"><img src="https://img.shields.io/badge/Isaac%20Sim-4.5%20reference-8ABA0F" alt="Isaac Sim 4.5 参考版本"></a>
+  <a href="docs/zh-CN/reference/compatibility.md"><img src="https://img.shields.io/badge/Ubuntu-24.04-E95420?logo=ubuntu&amp;logoColor=white" alt="Ubuntu 24.04 参考环境"></a>
+  <br>
+  <a href="docs/zh-CN/reference/compatibility.md"><img src="https://img.shields.io/badge/Python-3.10%20reference-3776AB" alt="Python 3.10 参考版本"></a>
+  <a href="#项目状态与问题反馈"><img src="https://img.shields.io/badge/status-active-2EA44F" alt="项目状态：活跃"></a>
+  <a href="THIRD_PARTY_NOTICES.zh-CN.md"><img src="https://img.shields.io/badge/license-multi--license-7952B3" alt="许可证：多许可证"></a>
+</p>
+
 > [!IMPORTANT]
 > 这是研究代码库，不是独立的 Isaac Lab 发行版。当前路线依赖外部 Isaac Lab 2.1.1 / Isaac Sim 4.5 环境；UIPC 实验还会编译仓库内的 libuipc 源码。安装前请先阅读[兼容性与验证状态](docs/zh-CN/reference/compatibility.md)。
 

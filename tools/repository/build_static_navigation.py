@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Build static script-navigation and path-adaptation reports.
 
 This tool reads Python source with ``ast`` and reads the existing path-reference
@@ -23,7 +23,7 @@ WORKSPACE = Path(__file__).resolve().parents[2]
 DOCS_DIR = WORKSPACE / "docs"
 TOOLS_DIR = WORKSPACE / "tools" / "repository"
 INVENTORY_CSV = TOOLS_DIR / "ENTRYPOINT_INVENTORY.csv"
-MATRIX_MD = DOCS_DIR / "ENTRYPOINT_MATRIX.md"
+MATRIX_MD = DOCS_DIR / "internal" / "ENTRYPOINT_MATRIX.md"
 PATH_SOURCE_CSV = TOOLS_DIR / "external_path_references.csv"
 PATH_PLAN_CSV = TOOLS_DIR / "PATH_ADAPTATION_PLAN.csv"
 ADAPTATIONS_CSV = TOOLS_DIR / "PORTABILITY_ADAPTATIONS.csv"
@@ -49,8 +49,8 @@ class Baseline:
     local_package_roots: frozenset[str]
 
 
-CURRENT_ROOT = WORKSPACE / "active-isaaclab-2.1"
-LEGACY_ROOT = WORKSPACE / "archive-isaaclab-2.3"
+CURRENT_ROOT = WORKSPACE / "active-isaaclab-2.1.1"
+LEGACY_ROOT = WORKSPACE / "archive-isaaclab-2.3.2"
 BASELINES = (
     Baseline(
         key="2.1.1",
@@ -402,14 +402,14 @@ def build_matrix(rows: list[dict[str, object]]) -> str:
             "",
             "| 基线 | 文件 | 静态用途 |",
             "|---|---|---|",
-            f"| 2.1.1 | [`run.sh`](../{workspace_path(CURRENT_ROOT / 'run.sh')}) | OpenWorldTactile 项目启动/环境包装脚本 |",
-            f"| 2.3.2 | [`inspect_gelsight_cfg.py`](../{workspace_path(LEGACY_ROOT / 'tools/inspect_gelsight_cfg.py')}) | GelSight 配置检查辅助脚本 |",
-            f"| 2.3.2 | [`set_openworldtactile_camera_view.py`](../{workspace_path(LEGACY_ROOT / 'tools/set_openworldtactile_camera_view.py')}) | OpenWorldTactile 相机视角辅助脚本 |",
-            f"| 2.3.2 | [`run-original-gelsight.sh`](../{workspace_path(LEGACY_ROOT / 'tools/run-original-gelsight.sh')}) | 原 GelSight 保存流程包装脚本 |",
+            f"| 2.1.1 | [`run.sh`](../../{workspace_path(CURRENT_ROOT / 'run.sh')}) | OpenWorldTactile 项目启动/环境包装脚本 |",
+            f"| 2.3.2 | [`inspect_gelsight_cfg.py`](../../{workspace_path(LEGACY_ROOT / 'tools/inspect_gelsight_cfg.py')}) | GelSight 配置检查辅助脚本 |",
+            f"| 2.3.2 | [`set_openworldtactile_camera_view.py`](../../{workspace_path(LEGACY_ROOT / 'tools/set_openworldtactile_camera_view.py')}) | OpenWorldTactile 相机视角辅助脚本 |",
+            f"| 2.3.2 | [`run-original-gelsight.sh`](../../{workspace_path(LEGACY_ROOT / 'tools/run-original-gelsight.sh')}) | 原 GelSight 保存流程包装脚本 |",
             "",
             "## 完整脚本清单",
             "",
-            "“可直接导航”仅来自静态主守卫等信号；“运行依赖根”不包含 Python 标准库。资产列是源码字符串中可静态识别的文件引用摘要。完整字段见 `../tools/repository/ENTRYPOINT_INVENTORY.csv`。",
+            "“可直接导航”仅来自静态主守卫等信号；“运行依赖根”不包含 Python 标准库。资产列是源码字符串中可静态识别的文件引用摘要。完整字段见 `../../tools/repository/ENTRYPOINT_INVENTORY.csv`。",
         ]
     )
 
@@ -430,7 +430,7 @@ def build_matrix(rows: list[dict[str, object]]) -> str:
                 group_rows[(baseline, group)],
                 key=lambda item: str(item["filename"]).lower(),
             ):
-                link = f"../{row['source_path']}"
+                link = f"../../{row['source_path']}"
                 assets = compact_list(row["referenced_assets"], 2)
                 lines.append(
                     "| "
@@ -457,8 +457,8 @@ def build_matrix(rows: list[dict[str, object]]) -> str:
             "- `yes` 只表示文件具备静态直接执行结构，不证明依赖齐全或仿真结果正确。",
             "- API、环境配置和无主守卫测试仍完整登记，因为它们是版本关系的一部分。",
             "- 本报告没有给 2.3.2 人为指定一个不存在的统一主入口。",
-            "- 当前可移植性机制见 `../tools/repository/PORTABILITY_ADAPTATIONS.csv`。",
-            "- 路径适配优先级见 `../tools/repository/PATH_ADAPTATION_PLAN.csv`，缺失依赖见 `DEPENDENCY_GAPS.md`。",
+            "- 当前可移植性机制见 `../../tools/repository/PORTABILITY_ADAPTATIONS.csv`。",
+            "- 路径适配优先级见 `../../tools/repository/PATH_ADAPTATION_PLAN.csv`，缺失依赖见 `DEPENDENCY_GAPS.md`。",
         ]
     )
     return "\n".join(lines)

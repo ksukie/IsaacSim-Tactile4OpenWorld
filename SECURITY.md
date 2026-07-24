@@ -1,8 +1,12 @@
+<p align="right">
+  <strong>English</strong> · <a href="SECURITY.zh-CN.md">简体中文</a>
+</p>
+
 # Security policy
 
 ## Supported code
 
-Security fixes target the latest state of `active-isaaclab-2.1/`. The `archive-isaaclab-2.3/` line is retained for research reproducibility and does not receive routine security maintenance.
+Security fixes target the latest state of `active-isaaclab-2.1.1/`. The `archive-isaaclab-2.3.2/` line is retained for research reproducibility and does not receive routine security maintenance.
 
 ## Reporting a vulnerability
 

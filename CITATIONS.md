@@ -1,3 +1,7 @@
+<p align="right">
+  <strong>English</strong> · <a href="CITATIONS.zh-CN.md">简体中文</a>
+</p>
+
 # Research citations
 
 If a publication or benchmark uses a method below, cite the corresponding original work in addition to citing IsaacSim-Tactile4OpenWorld and its OpenWorldTactile framework. This file records scholarly attribution; it does not replace software licenses in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).

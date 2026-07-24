@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Create and statically verify the IsaacSim-Tactile4OpenWorld manifest."""
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ from pathlib import Path
 from urllib.parse import unquote
 
 
-MAINLINE_DIR = "active-isaaclab-2.1"
-LEGACY_DIR = "archive-isaaclab-2.3"
+MAINLINE_DIR = "active-isaaclab-2.1.1"
+LEGACY_DIR = "archive-isaaclab-2.3.2"
 DOCS_DIR = "docs"
 MANIFEST_NAME = "FINAL_MANIFEST.csv"
 EXPECTED_COUNTS = {MAINLINE_DIR: 3688, LEGACY_DIR: 58}
@@ -176,9 +176,7 @@ def validate_python_ast(workspace: Path) -> int:
 
 def markdown_files(workspace: Path, tools_dir: Path) -> list[Path]:
     candidates = [*sorted(workspace.glob("*.md")), *sorted((workspace / DOCS_DIR).rglob("*.md"))]
-    tools_readme = tools_dir / "README.md"
-    if tools_readme.exists():
-        candidates.append(tools_readme)
+    candidates.extend(sorted(tools_dir.glob("README*.md")))
     return candidates
 
 
@@ -413,7 +411,9 @@ def write_confirmation(
 
 本确认只执行文件系统、哈希、AST、链接和文本/字节扫描；未安装依赖、未编译、未启动 Isaac Lab 或 Isaac Sim，也未连接硬件。
 """
-    (workspace / DOCS_DIR / "PATH_CONFIRMATION.md").write_text(content, encoding="utf-8", newline="\n")
+    (workspace / DOCS_DIR / "internal" / "PATH_CONFIRMATION.md").write_text(
+        content, encoding="utf-8", newline="\n"
+    )
 
 
 def main() -> None:

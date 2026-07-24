@@ -1,30 +1,39 @@
-# 仓库静态校验工具
+<p align="right">
+  <strong>English</strong> · <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-本目录只保存最终 IsaacSim-Tactile4OpenWorld 工作树所需的清单、报告和纯静态工具，不属于任一 Isaac Lab 版本载荷。
+# Repository validation tools
 
-- `FINAL_MANIFEST.csv`：3,746 个最终版本载荷文件的相对路径、大小和 SHA-256。
-- `PORTABILITY_ADAPTATIONS.csv`：SDK、Python 解释器和外部触觉资产的可配置入口。
-- `ENTRYPOINT_INVENTORY.csv`：两个版本 `experiments/`（及当前版本 `tools/`）下 153 个 Python 文件的静态入口、导入和资产引用清单。
-- `PATH_ADAPTATION_PLAN.csv`：当前外部或运行时路径引用的逐项分类。
-- `external_path_references.csv`：外部环境与运行时路径扫描结果。
-- `usda_reference_check.csv`：USDA 相对引用与外部引用检查结果。
-- `markdown_link_check.csv`：顶层项目文档的本地链接检查结果。
-- `build_static_navigation.py`：从当前源码重新生成入口矩阵、入口清单和路径分类。
-- `finalize_layout.py`：按最终清单复核载荷哈希，并执行 AST、链接、USDA、路径冲突、压缩文件及遗留名称片段检查。
-- `audit_open_source.py`：检查发布政策文件、关键许可证、包元数据、凭据形态、生成目录和禁止进入公开仓库的原生/不透明载荷。
+This directory contains static release inventories, reports, and validation scripts. It is maintainer tooling, not part of either Isaac Lab runtime payload.
 
-常用静态命令：
+## Generated records
+
+| File | Purpose |
+|---|---|
+| `FINAL_MANIFEST.csv` | Path, size, and SHA-256 for every file in the two versioned runtime payloads |
+| `PORTABILITY_ADAPTATIONS.csv` | Configurable SDK, Python, and external-asset entry points |
+| `ENTRYPOINT_INVENTORY.csv` | Static Python entry-point, import, and asset-reference inventory |
+| `PATH_ADAPTATION_PLAN.csv` | Classification and disposition of external/runtime path references |
+| `external_path_references.csv` | External path scan results |
+| `usda_reference_check.csv` | USDA relative and external reference checks |
+| `markdown_link_check.csv` | Local-link checks for maintained top-level documentation |
+
+## Commands
+
+Run from the repository root with a standard Python 3 interpreter:
 
 ```bash
-py tools/repository/audit_open_source.py
-py tools/repository/build_static_navigation.py
-py tools/repository/finalize_layout.py
+python tools/repository/audit_open_source.py
+python tools/repository/build_static_navigation.py
+python tools/repository/finalize_layout.py
 ```
 
-只有在确认最终载荷有意变更后，才重新写入清单：
+These checks do not import project packages, install dependencies, compile UIPC, or launch Isaac Sim.
+
+Only rewrite the payload manifest after confirming that every runtime-payload change is intentional:
 
 ```bash
-py tools/repository/finalize_layout.py --write-manifest
+python tools/repository/finalize_layout.py --write-manifest
 ```
 
-这些工具不导入项目模块、不安装依赖、不编译，也不启动仿真。
+`build_static_navigation.py` refreshes the generated inventory and [`docs/internal/ENTRYPOINT_MATRIX.md`](../../docs/internal/ENTRYPOINT_MATRIX.md). `finalize_layout.py` verifies manifest hashes plus AST syntax, documentation links, USDA references, path conflicts, compressed files, and legacy-name fragments. `audit_open_source.py` checks release policies, licenses, package metadata, credential-like content, generated directories, and prohibited native/opaque payloads.

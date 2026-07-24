@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """Run the repository's dependency-free open-source release checks."""
 
 from __future__ import annotations
@@ -19,22 +19,22 @@ REQUIRED_FILES = (
     "SECURITY.md",
 )
 REQUIRED_LICENSES = (
-    "archive-isaaclab-2.3/LICENSE",
-    "active-isaaclab-2.1/vendor/agilex-piper/piper_ros/LICENSE",
-    "active-isaaclab-2.1/packages/uipc/libuipc/LICENSE",
-    "active-isaaclab-2.1/packages/uipc/libuipc/python/LICENSE",
-    "active-isaaclab-2.1/packages/uipc/libuipc/external/tetgen/LICENSE",
-    "active-isaaclab-2.1/packages/uipc/libuipc/external/muda/LICENSE",
-    "active-isaaclab-2.1/packages/uipc/libuipc/external/muda/external/catch2/LICENSE_1_0.txt",
-    "active-isaaclab-2.1/packages/uipc/libuipc/external/octree/Octree/LICENSE",
-    "active-isaaclab-2.1/packages/uipc/libuipc/src/geometry/bvh/LICENSE-SimpleBVH",
-    "active-isaaclab-2.1/packages/uipc/libuipc/src/geometry/bvh/LICENSE-NSEssentials",
-    "active-isaaclab-2.1/packages/core/openworldtactile/simulation_approaches/fots/LICENSE",
-    "active-isaaclab-2.1/packages/core/openworldtactile/simulation_approaches/fem_based/sim/LICENSE",
-    "active-isaaclab-2.1/packages/assets/openworldtactile_assets/data/Sensors/GelSight_Mini/LICENSE",
-    "active-isaaclab-2.1/packages/assets/openworldtactile_assets/data/Robots/Franka/GelSight_Mini/LICENSE",
-    "active-isaaclab-2.1/packages/assets/openworldtactile_assets/data/Robots/Franka/LICENSE-APACHE-2.0",
-    "active-isaaclab-2.1/vendor/agilex-piper/piper_ros/src/piper_moveit/moveit-1.1.11/LICENSE.txt",
+    "archive-isaaclab-2.3.2/LICENSE",
+    "active-isaaclab-2.1.1/vendor/agilex-piper/piper_ros/LICENSE",
+    "active-isaaclab-2.1.1/packages/uipc/libuipc/LICENSE",
+    "active-isaaclab-2.1.1/packages/uipc/libuipc/python/LICENSE",
+    "active-isaaclab-2.1.1/packages/uipc/libuipc/external/tetgen/LICENSE",
+    "active-isaaclab-2.1.1/packages/uipc/libuipc/external/muda/LICENSE",
+    "active-isaaclab-2.1.1/packages/uipc/libuipc/external/muda/external/catch2/LICENSE_1_0.txt",
+    "active-isaaclab-2.1.1/packages/uipc/libuipc/external/octree/Octree/LICENSE",
+    "active-isaaclab-2.1.1/packages/uipc/libuipc/src/geometry/bvh/LICENSE-SimpleBVH",
+    "active-isaaclab-2.1.1/packages/uipc/libuipc/src/geometry/bvh/LICENSE-NSEssentials",
+    "active-isaaclab-2.1.1/packages/core/openworldtactile/simulation_approaches/fots/LICENSE",
+    "active-isaaclab-2.1.1/packages/core/openworldtactile/simulation_approaches/fem_based/sim/LICENSE",
+    "active-isaaclab-2.1.1/packages/assets/openworldtactile_assets/data/Sensors/GelSight_Mini/LICENSE",
+    "active-isaaclab-2.1.1/packages/assets/openworldtactile_assets/data/Robots/Franka/GelSight_Mini/LICENSE",
+    "active-isaaclab-2.1.1/packages/assets/openworldtactile_assets/data/Robots/Franka/LICENSE-APACHE-2.0",
+    "active-isaaclab-2.1.1/vendor/agilex-piper/piper_ros/src/piper_moveit/moveit-1.1.11/LICENSE.txt",
 )
 DISALLOWED_SUFFIXES = {".ckpt", ".dll", ".dylib", ".exe", ".pt", ".pyd", ".so"}
 GENERATED_DIR_NAMES = {".mypy_cache", ".pytest_cache", ".ruff_cache", "__pycache__"}
@@ -68,19 +68,19 @@ def main() -> int:
             failures.append(f"opaque/native release artifact is tracked: {relative(path)}")
 
     excluded_paths = (
-        "archive-isaaclab-2.3/hardware-sdk/openworldtactile",
-        "active-isaaclab-2.1/packages/assets/openworldtactile_assets/data/Props/tactile_test_shapes",
-        "active-isaaclab-2.1/packages/assets/openworldtactile_assets/data/Policies",
+        "archive-isaaclab-2.3.2/hardware-sdk/openworldtactile",
+        "active-isaaclab-2.1.1/packages/assets/openworldtactile_assets/data/Props/tactile_test_shapes",
+        "active-isaaclab-2.1.1/packages/assets/openworldtactile_assets/data/Policies",
     )
     for name in excluded_paths:
         if (ROOT / name).exists():
             failures.append(f"excluded release material was restored: {name}")
 
     expected_package_licenses = {
-        "active-isaaclab-2.1/packages/core/setup.py": 'license="BSD-3-Clause"',
-        "active-isaaclab-2.1/packages/tasks/setup.py": 'license="BSD-3-Clause"',
-        "active-isaaclab-2.1/packages/assets/setup.py": "Multiple licenses; see THIRD_PARTY_NOTICES.md",
-        "active-isaaclab-2.1/packages/uipc/setup.py": "Multiple licenses; see THIRD_PARTY_NOTICES.md",
+        "active-isaaclab-2.1.1/packages/core/setup.py": 'license="BSD-3-Clause"',
+        "active-isaaclab-2.1.1/packages/tasks/setup.py": 'license="BSD-3-Clause"',
+        "active-isaaclab-2.1.1/packages/assets/setup.py": "Multiple licenses; see THIRD_PARTY_NOTICES.md",
+        "active-isaaclab-2.1.1/packages/uipc/setup.py": "Multiple licenses; see THIRD_PARTY_NOTICES.md",
     }
     for name, marker in expected_package_licenses.items():
         if marker not in (ROOT / name).read_text(encoding="utf-8"):
